@@ -17,13 +17,8 @@ used to determine matrix to be used for grid
 - 5 boundary_conditions::Int8: specifies boundary of the grid
 """
 
-real= true
-multiple_parameter = false
-debug_time_sleep = false
-debug_output = true
-multiple_trials = false
-save_hfig = true
-fig_dir = "C:\\Users\\2020\\Desktop\\CurrentReading\\AsideMy\\Coursework\\FlatNonNewtonFlowProblem\\Images\\IterationShapes"
+GC.gc()
+include("DefaultVariables.jl")
 
 println(@__DIR__)
 println(@__FILE__)
@@ -78,6 +73,11 @@ diff_backward(f, x; l=sqrt(eps(Float64))) = (f(x) - f(x-h))/l
 const DBh = diff_forward
 
 function choose_numgrid(multiple_trials::Bool, hsize, vsize, initial_step_value, expiremntal_increase, step_max)
+    #constant(linear proportionality) and the parameter
+    #indicating the degree of the speed upon nonlinear dependence
+    a, α = 3, 0.2
+    #Convinience parameter and specifying porosity(constant (porosity))
+    m = 1
     if  multiple_trials
         if hsize >=1 && vsize >=1
             rand_steps = [i for i in collect(initial_step_value:expiremntal_increase:step_max)]
@@ -119,6 +119,7 @@ function choose_numgrid(multiple_trials::Bool, hsize, vsize, initial_step_value,
             "Boundary conditions(Cartesian)", "Number of cells along axis(By default 100*100)"],
             Params_Numbers = [used_methods, (boundary_h, boundary_v), (mhgrid, mvgrid)])
         if multiple_parameter
+            a, α = [3*i for i in 1:a:5*a], [0.2*j for j in 1:α:5*α]
             Pddf = DataFrame(Names_of_derived_parameters =[
                 "Time step τ", "Space step h", "Porosity m",
                 "Proportionality constant a","Degree dependence α"], quantities = [mv, mh, m, a, α])
@@ -162,7 +163,8 @@ function choose_numgrid(multiple_trials::Bool, hsize, vsize, initial_step_value,
         #The only set of parameters and grid configuration
         Pddf = DataFrame(Names_of_derived_parameters =[
             "Time step τ", "Space step h", "Porosity m",
-            "Proportionality constant a","Degree dependence α"], quantities = [τ, h, m, a, α])
+            "Proportionality constant a","Degree dependence α", "hticks", "vticks"],
+            quantities = [τ, h, m, a, α, hticks, vticks])
     end
     return Pdf, Pddf
 end
@@ -170,19 +172,24 @@ end
 #determine_initial_surface_shape(initial_shape, multiple_trials, NL_1, NH, MV, h, (LD, RD, LU, RU))
 function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials::Bool,
     NL_1::Vector{Float64},  NH::Int64, MV::Int64, h::Float64,
-    LD, RD, LU, RU )
-    local LD, RD, UL, UR = LD, RD, UL, UR
+    LD, RD, LU, RU, hticks, vticks)
     if !multiple_trials
-        @match initial_shape begin
-            1 => let z::Float64 = 1.0, initial_const
-                 initial_const = z
-                 @time for i in 1:NH
-                     #print("I1: $i")
-                     NL_1[i] = z
-                 end
-             end
-        end#begin
-            2  => let R = max(RU^2, RD^2), initial_const = 0.0
+        hgrid = LD:h:RD # dr
+        vgrid = LU:τ:RU # dr
+        if initial_shape == 1
+            z::Float64 = 1.0
+            initial_const = z
+            @time for i in 1:NH
+            #print("I1: $i")
+                NL_1[i] = z
+            end
+            plot(hgrid, NL_1, c= :blue, label = "h(x) = $z at timestep = 1(from first up to $Mv)")
+            plot!([-LD,RD], [0,0], color=:black, lw=0.5, xlabel="r",
+            xlims= (LD, RD), ylims= (LU, RU),
+            label="", legend=:topleft)
+         elseif initial_shape == 2
+            Ru, Rd = RU^2, RD^2
+            R = max(Ru, Rd), initial_const = 0.0
             center = if RD- LD >= 0
                 (RD+ LD)/2
             else
@@ -201,23 +208,36 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
                     NL_1[i] = 0#sqrt(-new_value)
                 end
             end
-            @time for i in up_step:NH
+            @time for j in up_step:NH
                 #print("I1: $i")
-                new_value = R^2 - ((i - up_step) * h)^2
+                new_value = R^2 - ((j - up_step) * h)^2
                 if new_value>=0
-                    NL_1[i] = sqrt(new_value)
+                    NL_1[j] = sqrt(new_value)
                 else
-                    NL_1[i] = 0#sqrt(-new_value)
+                    NL_1[j] = 0#sqrt(-new_value)
                 end
             end
+            plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)", legend=:topleft)
+            #This defines only x axis and label refers to it's legend
+            #xticks=
+            plot!([-LD,RD], [0,0], color=:black, lw=0.5, xlabel="r",
+            xlims=(LD, RD), ylims= (LU, RU), label="",
+            xticks= hticks, yticks = vticks, minorgridlinewidth = h);
+        elseif initial_shape == 3
+            normalDensity(z) = pdf(Normal(), z)
+            d0 = normalDensity.(hgrid)
+            d1 = derivative.(normalDensity, hgrid)
+            d2 = second_derivative.(normalDensity, hgrid)
+            NL_1 = d0
+            plot(hgrid, [d0 d1 d2], c=[:blue :red :green], label=[L"f(x)" L"f’(x)" L"f’’(x)"], legend=:topleft)
+                #This defines only x axis and label refers to it's legend
+            #xticks=
+            plot!([-LD,RD], [0,0], color=:black, lw=0.5, xlabel="r",
+            xlims=(LD, RD), ylims= (LU, RU), label="",xticks= hticks, yticks = vticks, minorgridlinewidth = h);
+            NL_1 = d0
         end
-        3 => let normalDensity(z) = pdf(Normal(), z)
-        d0 = normalDensity.(hgrid)
-        d1 = derivative.(normalDensity, hgrid)
-        d2 = second_derivative.(normalDensity, hgrid)
-        NL_1 = d0
     end
-    end#match
+
     return NL_1
 end
 
@@ -260,64 +280,93 @@ one-step or vector-step traverse) I will need to
 choose one that will be variable throughout the cycles.
 """
 
+"Calculations within horizontal bypass approxiamation"
+function symmetric_layer_fill!(NL_2::Vector{Float64}, NL_1::Vector{Float64}, timestep::Int64)
+    Rel = τ/m
+    println("\n Variable steps: $τ ", " and $h"," τ/m=", "$Rel")
+    println("m: $m,\tProportionality constant a: $a,\tDegree of nonlinearity: $α")
+    deg_l, deg_c, deg_r = (1/α)-1, 1/α, 1+1/α
+    #Boundary conditions
+    #NL_2[1], maxelem_index = findmax(NL_1)
+    for j in 2:Nh
+         first_term = (NL_1[j+1]-NL_1[j])^deg_r/(a^deg_c* h^deg_r)
+         second_term = (NL_1[j]/(a^deg_c* h))*( (NL_1[j+1]-NL_1[j])/h )^deg_c
+         sech_derivative = (NL_1[j+1]-2*NL_1[j]+NL_1[j-1])/h^2
+         K = sech_derivative*NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l
+         (debug_output && println("Cautious at third term, : $K"))
+         third_term =  K/(α* a^deg_c* h^deg_l) #sech_derivative* NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l/(α* a^deg_c* h^deg_l)
+         println("First_term: $first_term\tSecond_term: $second_term\tThird_term: $third_term\nWith second derivative = $sech_derivative")
+         (debug_time_sleep && sleep(2))
+         NL_2[j] = Rel* (first_term- second_term- third_term) + NL_1[j]
+         res_next_layer = round(NL_2[j], digits=4)
+         println("NL_2[$j]: \t$res_next_layer")
+     end
+     #Non-reflective conditions
+     NL_2[NH]= deepcopy(NL_2[Nh])
+     NL_2[1]= deepcopy(NL_2[2])
+     (debug_output && print("Second array after horizontal cross: $NL_2"))
+     println("The last element approximation get used to be: $(NL_2[NH])
+            and first boundary condition imply at previous layer step NL_2[1] = $(NL_2[1])")
+     shape_file_record = joinpath("Results", "Layerh_$(timestep).txt")
+     #shape_file_record = "Results/Layerh_$(timestep).txt"
+     wvec_layer(NL_2, shape_file_record, timestep)
+     #norm(NL_2) norm.(eachcol(NL_2))  f1(A,d=1) = sqrt.(sum(abs2,A,d))  f1(NL_2)
+     (debug_time_sleep && sleep(1))
+     (debug_output && print("Last step before return: $NL_2"))
+     return NL_2
+end
+
 #Let's start from the first one
-function axisymmetric_parabolic_scheme(u::AbstractArray{T, N}, #timesteps::Integer,
-    Pdf::DataFrame, Pddf::DataFrame, uprev::AbstractArray{T, N}= copy(u[1]), unew::AbstractArray{T, N}= copy(u[2])) where {T<:Number, N}
+function axisymmetric_parabolic_scheme(u::Array{Float64, 2}, #timesteps::Integer,
+    Pdf::DataFrame, Pddf::DataFrame, uprev::Vector{Float64}, unew::Vector{Float64},
+    initial_shape::Int64)
+    simple_one_prmset = !multiple_trials && !multiple_parameter
     println("Pdf:   ", eltype.(eachcol(Pdf)))
     println("Pddf:   ", eltype.(eachcol(Pddf)))
-    Nh::Int64, Mv::Int64 = Pdf[3, 2]
-    println("Grid size: $Nh * $Mv, Layer: $timestep")
-    τ, h, m, a, α = Pddf[1:5, 2]#parse(Vector{Float64}
+
     # 2D point's scope
     LD, RD, LU, RU = Float64(boundary_h[1]), Float64(boundary_h[2]), Float64(boundary_v[1]), Float64(boundary_v[2])
-"Calculations within horizontal bypass approxiamation"
-    function symmetric_layer_fill!(NL_2::Vector{Float64}, NL_1::Vector{Float64}, timestep::Int64)
-        Rel = τ/m
-        println("\n Variable steps: $τ ", " and $h"," τ/m=", "$Rel")
-        println("m: $m,\tProportionality constant a: $a,\tDegree of nonlinearity: $α")
-        deg_l, deg_c, deg_r = (1/α)-1, 1/α, 1+1/α
-        #Boundary conditions
-        #NL_2[1], maxelem_index = findmax(NL_1)
-        for j in 2:Nh
-             first_term = (NL_1[j+1]-NL_1[j])^deg_r/(a^deg_c* h^deg_r)
-             second_term = (NL_1[j]/(a^deg_c* h))*( (NL_1[j+1]-NL_1[j])/h )^deg_c
-             sech_derivative = (NL_1[j+1]-2*NL_1[j]+NL_1[j-1])/h^2
-             K = sech_derivative*NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l
-             (debug_output && println("Cautious at third term, : $K"))
-             third_term =  K/(α* a^deg_c* h^deg_l) #sech_derivative* NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l/(α* a^deg_c* h^deg_l)
-             println("First_term: $first_term\tSecond_term: $second_term\tThird_term: $third_term\nWith second derivative = $sech_derivative")
-             (debug_time_sleep && sleep(2))
-             NL_2[j] = Rel* (first_term- second_term- third_term) + NL_1[j]
-             res_next_layer = round(NL_2[j], digits=4)
-             println("NL_2[$j]: \t$res_next_layer")
-         end
-         #Non-reflective conditions
-         NL_2[NH]= deepcopy(NL_2[Nh])
-         NL_2[1]= deepcopy(NL_2[2])
-         (debug_output && print("Second array after horizontal cross: $NL_2"))
-         println("The last element approximation get used to be: $(NL_2[NH])
-                and first boundary condition imply at previous layer step NL_2[1] = $(NL_2[1])")
-         shape_file_record = joinpath("Results", "Layerh_$(timestep).txt")
-         #shape_file_record = "Results/Layerh_$(timestep).txt"
-         wvec_layer(NL_2, shape_file_record, timestep)
-         #norm(NL_2) norm.(eachcol(NL_2))  f1(A,d=1) = sqrt.(sum(abs2,A,d))  f1(NL_2)
-         (debug_time_sleep && sleep(1))
-         (debug_output && print("Last step before return: $NL_2"))
-         return NL_2
-    end
     #This case determine the one-parameter set with 4-point stencil
-    if N== 2
-        @time for i in 2:Mv-1
-            (debug_output && print("$i- timestep\t"))
-            println("Before passing over to horizontal tour: layer NL_1 = ", NL_1,"\nlayer NL_2 = ", NL_2)
-            NL_2 = symmetric_layer_fill!(uprev, unew, i)
-            u[i, :] = deepcopy(NL_2)
+    if simple_one_prmset
+        Nh::Int64, Mv::Int64 = Pdf[3, 2]
+        println("Grid size: $Nh * $Mv")
+        τ, h, m, a, α = Pddf[1:5, 2]#parse(Vector{Float64}
+        hgrid = LD:h:RD # dr
+        vgrid = LU:τ:RU # dr
+        @time for i in 2:Mv
+            (debug_output && print("Layer $i\t"))
+            println("Before passing over to horizontal tour: layer NL_1 = ", uprev,"\nlayer NL_2 = ", unew)
+            unew = symmetric_layer_fill!(unew, uprev, i)
+            u[i, :] = deepcopy(unew)
             #w[i] = NL_2
-            NL_1 = deepcopy(NL_2)
-            NL_2[:] .= 0.0
+            uprev = deepcopy(unew)
+            unew[:] .= 0.0
+            #print(hticks, vticks)
+            #sleep(2)
+            #, xticks= hticks, yticks = vticks, marker=:xcross, xlims= (LD, RD),ylims= (-LU, RU)
+            plot(hgrid, u[i, :], c = :blue, label = "h(x) = z at timestep $i")
+            plot!(hgrid, unew, label = "NL_2 at timestep $i");
+                nd = ndigits(MV)
+                ni = ndigits(i)
+                zeros_rep = repeat('0', nd - ni)
+            if initial_shape in 1:3 && save_hfig
+                if initial_shape == 1
+                    fig_path = joinpath(fig_dir, "plane_$zeros_rep$i.png")
+                elseif initial_shape == 2
+                    fig_path = joinpath(fig_dir, "sphere_$zeros_rep$i.png")
+                elseif initial_shape == 3
+                    fig_path = joinpath(fig_dir, "gauss_uniform_distribution_$zeros_rep$i.png")
+                end
+                savefig(fig_path)
+            elseif !(initial_shape in 1:3)
+                (debug_output && print("Released shapes are from 1 up to 3"))
+            else
+                plot()
+            end
         end
     end
 end
+
 #Now lets read file data or leave the default ones
 initial_dir = abspath("C:/Users/2020/Desktop/CurrentReading/AsideMy/RCJsPyJulia_projects/ConcreteFluidSystem/ParabolicEquation")
 if pwd() == "C:\\Users\\2020" && Sys.iswindows()
@@ -326,22 +375,9 @@ if pwd() == "C:\\Users\\2020" && Sys.iswindows()
 end
 println("\nCurrent directory with program: \n", pwd())
 #------------------------------------------------------------------------------------------------------------------
-#Generate necessary input parameters for the scheme
-const Params_Number = 5
-used_methods::AbstractString = "fd"
-const boundary_h = (-1, 1) #lb::Integer= , rb::Integer=
-const boundary_v = (-1, 1)
-hgrid_steps::Vector{Int64} = []
-vgrid_steps::Vector{Int64} = []
-const Nh, Mv::Int64= 50, 70
-# 2D point's scope
-const LD, RD, LU, RU = Float64(boundary_h[1]), Float64(boundary_h[2]), Float64(boundary_v[1]), Float64(boundary_v[2])
-const hsize = RD - LD
-const vsize = RU - LU
-const initial_step_value::Int64 = 10
-const step_max::Int64 = 1000
-const expiremntal_increase = floor(Int64, step_max/5)
-Pdf, Pddf = choose_numgrid(multiple_trials, hsize, vsize, initial_step_value, expiremntal_increase, step_max)
+
+Pdf, Pddf = choose_numgrid(multiple_trials, hsize, vsize,
+     initial_step_value, expiremntal_increase, step_max)
 
 println("Pdf:   ", eltype.(eachcol(Pdf)))
 println("Pddf:   ", eltype.(eachcol(Pddf)))
@@ -373,10 +409,10 @@ if !multiple_trials
     u = zeros(MV, NH)
     w = Nodes(Dual, dims)
     primary_data = Dict{String, Any}("used_methods" => "fd", "boundary" => Dict("boundary_h"=>Nh,"boundary_v"=>Mv),
-                "number_of_steps" => Dict("NX"=>Nh,"NY"=>Mv))
+                "number_of_steps" => Dict("NX"=>Nh, "NY"=>Mv))
     #Extract some for initialization step
     if multiple_parameter
-        model_data = Dict("proportionality_constant" => a, "model_degree" => [α * i for i in 0:0.2:0.8],
+        model_data = Dict("proportionality_constant" => [a * j for j in 1:a:5], "model_degree" => [α * i for i in 1:α:5],
                     "porosity" => m)
     else
         model_data = Dict{String, Float64}("proportionality_constant" => a, "model_degree" => α,
@@ -388,7 +424,7 @@ elseif !multiple_parameter
     model_data = Dict("proportionality_constant" => a, "model_degree" => α,
                 "porosity" => m)
 end
-initial_shape = 1
+
 #Symbolic variables used in multistep discretisized grid for
 #parabolic equation
 Params_Numbers = "Params_Number_$Params_Number"
@@ -404,17 +440,19 @@ Symbolics.@variables b = randn(Mv, 1)
 #grid = CartesianGrid(dims)
 #To initialize h(r,t) I need the following: NH, MV, h
 if !multiple_trials
+    initial_shape = 3
     local Nh::Int64, Mv::Int64 = Pdf[3, 2]
     println("Grid size: $Nh * $Mv")
     τ, h= Pddf[1:2, 2]
+    hticks, vticks= Pddf[6:7, 2]
     #Here stuck!
-    NL_1= determine_initial_surface_shape(initial_shape, multiple_trials, NL_1, NH, MV, h, LD, RD, LU, RU)
+    NL_1= determine_initial_surface_shape!(initial_shape, multiple_trials, NL_1,
+    NH, MV, h, LD, RD, LU, RU, hticks, vticks)
+    initialshape_file_record = "Results/Layerh_1.txt"
+    delim = " & \n"
+    wvec_layer(NL_1, initialshape_file_record, 1, delim)
+    plot()
 end
-
-
-
-
-@macroexpand @nref 2 NL i
 #Shape of surface, starts with 1
 delta_axis = 0.01
 initial_const = 0.0
@@ -425,27 +463,10 @@ initial_const = 0.0
 u[1, :]= deepcopy(NL_1)
 w[1, :]= deepcopy(NL_1)
 println("By reference?: $(NL_1 == NL[1])")
-function axisymmetric_parabolic_scheme(u, #timesteps::Integer,
-    Pdf::DataFrame, Pddf::DataFrame, NL_1, NL_2)
-    #Write vector result
-    plot(hgrid, NL_1, c = :blue, label = "h(x) = z at timestep $i")
-    plot!(hgrid, NL_2, c = :brown, marker=:xcross, xlims= (LD+ delta_axis, RD+ delta_axis),
-        ylims= (-1,1),xticks= hticks, yticks = vticks,
-        ms=6, msw=0, label = "NL_2 at timestep $i", legend=:topleft);
-    if initial_shape in 1:3 && save_hfig
-        if initial_shape == 1
-            fig_path = joinpath(fig_dir, "plane_$i.png")
-        elseif initial_shape == 2
-            fig_path = joinpath(fig_dir, "sphere_$i.png")
-        elseif initial_shape == 3
-            fig_path = joinpath(fig_dir, "gauss_uniform_distribution_$i.png")
-        end
-        savefig(fig_path)
-    elseif !(initial_shape in 1:3)
-        (debug_time_sleep && print("Released shapes are from 1 up to 3"))
-    else
-        plot()
-    end
-    print("Layer i= $i, value= $NL_1")
-end
+
+#symmetric_layer_fill!(NL_2, NL_1, 2)
+axisymmetric_parabolic_scheme(u, #timesteps::Integer,
+    Pdf, Pddf, NL_1, NL_2, initial_shape)
+
+@macroexpand @nref 2 NL i
 #Additionly create plots from the resulting 2-dim massive
