@@ -173,6 +173,8 @@ end
 function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials::Bool,
     NL_1::Vector{Float64},  NH::Int64, MV::Int64, h::Float64,
     LD, RD, LU, RU, hticks, vticks)
+    nd = ndigits(MV)
+    zeros_rep = repeat('0', nd - 1)
     if !multiple_trials
         hgrid = LD:h:RD # dr
         vgrid = LU:τ:RU # dr
@@ -185,19 +187,21 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
             end
             plot(hgrid, NL_1, c= :blue, label = "h(x) = $z at timestep = 1(from first up to $Mv)", xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5,
             legend=:topleft)
+            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
          elseif initial_shape == 2
             Ru, Rd = RU^2, RD^2
-            R = max(Ru, Rd), initial_const = 0.0
+            R = max(Ru, Rd)
+            initial_const = 0.0
             center = if RD- LD >= 0
-                (RD+ LD)/2
+                (RD + LD)/2
             else
-                (RD- LD)/2
+                (RD - LD)/2
             end
             NL_1[1] = initial_const
             up_step = floor(Int, NH/2)
             @time for i in 2:(up_step+1)
-                #print("I1: $i")
-                new_value = R^2 - ((up_step - i) * h )^2
+                print("I1: $i")
+                new_value = R^2 - ((up_step - i) * h)^2
                 print("Step: $i, value: $new_value")
                 #new_value = sqrt(max(0, R^2 - i * h^2))
                 if new_value>=0
@@ -206,7 +210,7 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
                     NL_1[i] = 0#sqrt(-new_value)
                 end
             end
-            @time for j in up_step:NH
+            @time for j in (up_step+1):NH
                 #print("I1: $i")
                 new_value = R^2 - ((j - up_step) * h)^2
                 if new_value>=0
@@ -217,6 +221,7 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
             end
             plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",  xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
             legend=:topleft)
+            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
             #This defines only x axis and label refers to it's legend
             #xticks=
         elseif initial_shape == 3
@@ -225,13 +230,13 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
             d1 = derivative.(normalDensity, hgrid)
             d2 = second_derivative.(normalDensity, hgrid)
             NL_1 = d0
-            plot(NL_1, [d0 d1 d2], c=[:blue :red :green], label=[L"f(x)" L"f’(x)" L"f’’(x)"], xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
+            plot(hgrid, [d0 d1 d2], c=[:blue :red :green], label=[L"f(x)" L"f’(x)" L"f’’(x)"], xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
             legend=:topleft)
                 #This defines only x axis and label refers to it's legend
             NL_1 = d0
+            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
         end
     end
-
     return NL_1
 end
 
@@ -287,7 +292,7 @@ function symmetric_layer_fill!(NL_2::Vector{Float64}, NL_1::Vector{Float64}, tim
          second_term = (NL_1[j]/(a^deg_c* h))*( (NL_1[j+1]-NL_1[j])/h )^deg_c
          sech_derivative = (NL_1[j+1]-2*NL_1[j]+NL_1[j-1])/h^2
          K = sech_derivative*NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l
-         (debug_output && println("Cautious at third term, : $K"))
+         (debug_output && println("Cautious at third term, : $K, others are: $second_term, $first_term"))
          third_term =  K/(α* a^deg_c* h^deg_l) #sech_derivative* NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l/(α* a^deg_c* h^deg_l)
          println("First_term: $first_term\tSecond_term: $second_term\tThird_term: $third_term\nWith second derivative = $sech_derivative")
          (debug_time_sleep && sleep(2))
@@ -343,24 +348,27 @@ function axisymmetric_parabolic_scheme(u::Array{Float64, 2}, #timesteps::Integer
                 nd = ndigits(MV)
                 ni = ndigits(i)
                 zeros_rep = repeat('0', nd - ni)
-            if initial_shape in 1:3 && save_hfig
-                if initial_shape == 1
-                    fig_path = joinpath(fig_dir, "plane_$zeros_rep$i.png")
-                elseif initial_shape == 2
-                    fig_path = joinpath(fig_dir, "sphere_$zeros_rep$i.png")
-                elseif initial_shape == 3
-                    fig_path = joinpath(fig_dir, "gauss_uniform_distribution_$zeros_rep$i.png")
-                end
-                savefig(fig_path)
-            elseif !(initial_shape in 1:3)
-                (debug_output && print("Released shapes are from 1 up to 3"))
-            else
-                plot()
-            end
+            spfig(initial_shape, fig_dir, zeros_rep, i ,debug_output, save_hfig)
         end
     end
 end
 
+function spfig(initial_shape::Int64, fig_dir::String, zeros_rep::String, i::Int64 ,debug_output::Bool = true, save_hfig::Bool = true)
+    if initial_shape in 1:3 && save_hfig
+        if initial_shape == 1
+            fig_path = joinpath(fig_dir, "plane_$zeros_rep$i.png")
+        elseif initial_shape == 2
+            fig_path = joinpath(fig_dir, "sphere_$zeros_rep$i.png")
+        elseif initial_shape == 3
+            fig_path = joinpath(fig_dir, "gauss_uniform_distribution_$zeros_rep$i.png")
+        end
+        savefig(fig_path)
+    elseif !(initial_shape in 1:3)
+        (debug_output && print("Released shapes are from 1 up to 3"))
+    else
+        plot()
+    end
+end
 #Now lets read file data or leave the default ones
 initial_dir = abspath("C:/Users/2020/Desktop/CurrentReading/AsideMy/RCJsPyJulia_projects/ConcreteFluidSystem/ParabolicEquation")
 if pwd() == "C:\\Users\\2020" && Sys.iswindows()
@@ -430,7 +438,6 @@ Symbolics.@variables b = randn(Mv, 1)
 #grid = CartesianGrid(dims)
 #To initialize h(r,t) I need the following: NH, MV, h
 if !multiple_trials
-    initial_shape = 3
     local Nh::Int64, Mv::Int64 = Pdf[3, 2]
     println("Grid size: $Nh * $Mv")
     τ, h= Pddf[1:2, 2]
