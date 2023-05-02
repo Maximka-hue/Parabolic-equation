@@ -189,19 +189,29 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
             legend=:topleft)
             spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
          elseif initial_shape == 2
-            Ru, Rd = RU^2, RD^2
-            R = max(Ru, Rd)
-            initial_const = 0.0
-            center = if RD- LD >= 0
-                (RD + LD)/2
-            else
-                (RD - LD)/2
-            end
+            Ru, Rd, Ld, Rd = RU^2, RD^2, LD^2, RD^2
+            R = max(Ru, Rd, Ld, Rd)
+            t = max(h, τ)
+            if !formula_init
+                 initial_const = 0.0
+                 center = if RD- LD >= 0
+                     (RD + LD)/2 # RD + LD
+                 else
+                     (RD - LD)/2
+                 end
             NL_1[1] = initial_const
-            up_step = floor(Int, NH/2)
-            @time for i in 2:(up_step+1)
+            if isinteger(NH/2)
+                up_step = Int(NH/2)
+                NL_1[up_step] = R
+                mid_next = up_step + 1
+            else
+                up_step = floor(Int, NH/2)
+                NL_1[up_step+1] = R
+                mid_next = up_step + 1
+            end
+            @time for i in 2:(up_step)
                 print("I1: $i")
-                new_value = R^2 - ((up_step - i) * h)^2
+                new_value = R - ((up_step - i) * t)^2
                 print("Step: $i, value: $new_value")
                 #new_value = sqrt(max(0, R^2 - i * h^2))
                 if new_value>=0
@@ -210,18 +220,39 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
                     NL_1[i] = 0#sqrt(-new_value)
                 end
             end
-            @time for j in (up_step+1):NH
+            @time for j in mid_next:NH
                 #print("I1: $i")
-                new_value = R^2 - ((j - up_step) * h)^2
+                new_value = R - ((j - up_step) * t)^2
                 if new_value>=0
                     NL_1[j] = sqrt(new_value)
                 else
                     NL_1[j] = 0#sqrt(-new_value)
                 end
             end
+            NL_1[NH] = initial_const
             plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",  xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
             legend=:topleft)
             spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
+        else
+            if isinteger(NH/2)
+               Len = Int(NH/2)
+               u1 = range(LD, stop=0, length=Len)
+               u2 = range(0, stop=RD, length=Len)
+           else
+               Len = floor(NH/2)
+               u1 = range(LD, stop=0, length=Len)
+               u2 = range(0, stop=RD, length=Len+1)
+           end
+            v = range(LU, stop=RU, length=MV)
+            uu1 = -(collect(u1)^2 .- R)
+            uu2 = -(collect(u2)^2 .- R)
+            print(u,"\n", uu)
+            pause(4)
+            NL_1 = reduce(append!, (uu1, uu2), init=Float[])
+            plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",  xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
+            legend=:topleft)
+            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
+        end
             #This defines only x axis and label refers to it's legend
             #xticks=
         elseif initial_shape == 3
@@ -296,9 +327,18 @@ function symmetric_layer_fill!(NL_2::Vector{Float64}, NL_1::Vector{Float64}, tim
          third_term =  K/(α* a^deg_c* h^deg_l) #sech_derivative* NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l/(α* a^deg_c* h^deg_l)
          println("First_term: $first_term\tSecond_term: $second_term\tThird_term: $third_term\nWith second derivative = $sech_derivative")
          (debug_time_sleep && sleep(2))
-         NL_2[j] = Rel* (first_term- second_term- third_term) + NL_1[j]
-         res_next_layer = round(NL_2[j], digits=4)
-         println("NL_2[$j]: \t$res_next_layer")
+         if initial_shape != 2
+              NL_2[j] = Rel* (first_term- second_term- third_term) + NL_1[j]
+              res_next_layer = round(NL_2[j], digits=4)
+              println("NL_2[$j]: \t$res_next_layer")
+         else
+             res = Rel * (first_term- second_term- third_term) + NL_1[j]
+             if  res < 100.0 && res > -100.0
+                  NL_2[j] = res
+             else
+                 NL_2[j] = NL_2[(NH - j)]
+            end
+        end
      end
      #Non-reflective conditions
      NL_2[NH]= deepcopy(NL_2[Nh])
