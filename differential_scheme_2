@@ -183,10 +183,8 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
             #print("I1: $i")
                 NL_1[i] = z
             end
-            plot(hgrid, NL_1, c= :blue, label = "h(x) = $z at timestep = 1(from first up to $Mv)")
-            plot!([-LD,RD], [0,0], color=:black, lw=0.5, xlabel="r",
-            xlims= (LD, RD), ylims= (LU, RU),
-            label="", legend=:topleft)
+            plot(hgrid, NL_1, c= :blue, label = "h(x) = $z at timestep = 1(from first up to $Mv)", xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5,
+            legend=:topleft)
          elseif initial_shape == 2
             Ru, Rd = RU^2, RD^2
             R = max(Ru, Rd), initial_const = 0.0
@@ -217,23 +215,19 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
                     NL_1[j] = 0#sqrt(-new_value)
                 end
             end
-            plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)", legend=:topleft)
+            plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",  xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
+            legend=:topleft)
             #This defines only x axis and label refers to it's legend
             #xticks=
-            plot!([-LD,RD], [0,0], color=:black, lw=0.5, xlabel="r",
-            xlims=(LD, RD), ylims= (LU, RU), label="",
-            xticks= hticks, yticks = vticks, minorgridlinewidth = h);
         elseif initial_shape == 3
             normalDensity(z) = pdf(Normal(), z)
             d0 = normalDensity.(hgrid)
             d1 = derivative.(normalDensity, hgrid)
             d2 = second_derivative.(normalDensity, hgrid)
             NL_1 = d0
-            plot(hgrid, [d0 d1 d2], c=[:blue :red :green], label=[L"f(x)" L"f’(x)" L"f’’(x)"], legend=:topleft)
+            plot(NL_1, [d0 d1 d2], c=[:blue :red :green], label=[L"f(x)" L"f’(x)" L"f’’(x)"], xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
+            legend=:topleft)
                 #This defines only x axis and label refers to it's legend
-            #xticks=
-            plot!([-LD,RD], [0,0], color=:black, lw=0.5, xlabel="r",
-            xlims=(LD, RD), ylims= (LU, RU), label="",xticks= hticks, yticks = vticks, minorgridlinewidth = h);
             NL_1 = d0
         end
     end
@@ -394,11 +388,7 @@ if !multiple_trials
     NL_1 = NL[1, :] #Passed by reference
     NL_2 = NL[2, :]
     (debug_time_sleep && println("NL: $NL, \nNL_1 and NL_2: $NL_1 and $NL_2 "))
-    #constant(linear proportionality) and the parameter
-    #indicating the degree of the speed upon nonlinear dependence
-    a, α = 3, 0.2
-    #Convinience parameter and specifying porosity(constant (porosity))
-    m = 1
+
     #Now i need to initialize shape of my surface and mesh grid also
     #SW = Point(LD, 0.0)
     #SE = Point(1.0, 0.0)
