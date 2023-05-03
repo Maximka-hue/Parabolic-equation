@@ -3,10 +3,10 @@ using SymEngine
 using CartesianGrids, Base.Cartesian #Meshes,Convex
 using Distributions, LinearAlgebra, Distances, Calculus, SpecialFunctions, LaTeXStrings
 using Printf, DataFrames, DelimitedFiles
-using Symbolics
+using Symbolics, MLStyle, ToggleableAsserts
 using Glob, JSON, JSONTables, CSV, Plots;
 """
-    symmetric_parabolic_scheme()
+    axissymmetric_parabolic_scheme()
 
 Provided with initial datas:
 - 1 used_methods::AbstractString: cd, fd, bd, pd (central, forward, backward, polynomial, etc.)
@@ -17,17 +17,86 @@ used to determine matrix to be used for grid
 - 5 boundary_conditions::Int8: specifies boundary of the grid
 """
 
-real= true
-debug_time_sleep = false
-debug_output = true
-multiple_prms = false
-multiple_trials = false
-save_hfig = true
-fig_dir = "C:\\Users\\2020\\Desktop\\CurrentReading\\AsideMy\\Coursework\\FlatNonNewtonFlowProblem\\Images\\IterationShapes"
+GC.gc()
+include("DefaultVariables.jl")
 
 println(@__DIR__)
 println(@__FILE__)
 println("PROGRAM_FILE=", PROGRAM_FILE)
+
+
+const real = true
+const multiple_parameter = true
+const debug_time_sleep = false
+const debug_output = true
+const formula_init = false
+const multiple_trials = false
+const save_hfig = true
+fig_dir = "C:\\Users\\2020\\Desktop\\CurrentReading\\AsideMy\\Coursework\\FlatNonNewtonFlowProblem\\Images\\IterationShapes"
+
+#Generate necessary input parameters for the scheme
+
+const Params_Number = 5
+used_methods::AbstractString = "fd"
+const boundary_h = (-5, 5) #lb::Integer= , rb::Integer=
+const boundary_v = (-5, 5)
+hgrid_steps::Vector{Int64} = []
+vgrid_steps::Vector{Int64} = []
+const Nh, Mv::Int64= 50, 100
+initial_shape = 1
+num_multiparams = 1
+# 2D point's scope
+const LD, RD, LU, RU = Float64(boundary_h[1]), Float64(boundary_h[2]), Float64(boundary_v[1]), Float64(boundary_v[2])
+const hsize = RD - LD
+const vsize = RU - LU
+const initial_step_value::Int64 = 10
+const step_max::Int64 = 1000
+const expiremntal_increase = floor(Int64, step_max/5)
+#constant(linear proportionality) and the parameter
+#indicating the degree of the speed upon nonlinear dependence
+a, α = 3, 1.2
+#Convinience parameter and specifying porosity(constant (porosity))
+m = 1
+
+
+
+#Simply for scaning data files
+function rdir(dir::AbstractString, pat::Glob.FilenameMatch)
+    result = String[]
+    for (root, dirs, files) in walkdir(dir)
+        append!(result, filter!(f -> occursin(pat, f), files), joinpath.(root, files))
+    end
+    return result
+end
+rdir(dir::AbstractString, pat::AbstractString) = rdir(dir, Glob.FilenameMatch(pat))
+
+function model_data_in_dir(primary_data, initial_dir)
+    # pass data as a json string (how it shall be displayed in a file)
+    string_primary_data = JSON.json(primary_data)
+    # write the file with the stringdata variable information
+    all_data_files = rdir(initial_dir, "*data*.txt")
+    #sort(readdir("."); by=f->stat(f).inode)
+    #df = glob("data*.txt"i) || glob("*data*.txt"i)
+    rprimary_data = Dict()
+    ndf = size(all_data_files)[1]
+    println("The acquired files: $all_data_files, \nWith size: $ndf")
+    if ndf == 1
+        fn = all_data_files[1]
+        println("File found in the current directory: $fn")
+        open(fn, "r") do f
+            global rprimary_data
+            dicttxt = readall(all_data_files)  # file information to string
+            rprimary_data= JSON.parse(dicttxt)  # parse and transform data
+        end
+    elseif ndf == 0
+        print("There are no files in directory")
+    elseif ndf >=1
+        for (i, file) in enumerate(all_data_files)
+             mv(file, "$file_$i.txt")
+        end
+    end
+    return (rprimary_data, ndf)
+end
 
 "Push the derivative forward by argument h with approximation to O(h^2)"
 diff_forward(f, x; l=sqrt(eps(Float64))) = (f(x+h) - f(x))/l
@@ -39,41 +108,258 @@ const DCh = diff_forward
 diff_backward(f, x; l=sqrt(eps(Float64))) = (f(x) - f(x-h))/l
 const DBh = diff_forward
 
-function wvec_layer(NL_2::Vector{Float64}, initialshape_file_record_p::String,
-     timestep::Int64, delim = " & \n")
-    NS2 = size(NL_2)[1]
-    euclid_norm = euclidean(NL_2, zeros(NS2))
-    (debug_output && println("Norm of vector: $euclid_norm\t, the size of second layer: $NS2"))
-    if isfile("Results/Layerh_$(timestep).txt")
+function choose_numgrid(multiple_trials::Bool, hsize, vsize, initial_step_value, expiremntal_increase, step_max)
+    #constant(linear proportionality) and the parameter
+    #indicating the degree of the speed upon nonlinear dependence
+    rstep_size::Int64 = 0
+    if  multiple_trials
+        if hsize >=1 && vsize >=1
+            rand_steps = [i for i in collect(initial_step_value:expiremntal_increase:step_max)]
+            hgrid_steps = hsize* rand_steps
+            vgrid_steps = vsize* rand_steps
+            #m- stands for multiple
+            mh = hsize / hgrid_steps
+            mv = vsize / vgrid_steps
+        elseif hsize <= 1 && vsize <= 1 && hsize>=0 && vsize>=0
+            step_max_red = hsize* step_max
+            expiremntal_increase = step_max_red
+            rand_steps = [i for i in collect(initial_step_value:expiremntal_increase:step_max)]
+            hgrid_steps = rand_steps
+            vgrid_steps = rand_step
+            mh = hsize / hgrid_steps
+            mv = vsize / vgrid_steps
+        elseif hsize <= -1 && vsize  <= -1
+            #Convert to positive grid steps
+            hsize = min(0,- hsize)
+            vsize = min(0,- vsize)
+            rand_steps = [i for i in collect(initial_step_value:expiremntal_increase:step_max)]
+            hgrid_steps = hsize* rand_steps
+            vgrid_steps = vsize* rand_steps
+            mh = hsize / hgrid_steps
+            mv = vsize / vgrid_steps
+        elseif hsize >= -1 && vsize >= -1 && hsize<=0 && vsize<=0 #For explicitness
+            hsize = min(0,- hsize)
+            vsize = min(0,- vsize)
+            step_max_red = hsize* step_max
+            expiremntal_increase = step_max_red
+            rand_steps = [i for i in collect(initial_step_value:expiremntal_increase:step_max)]
+            hgrid_steps = rand_steps
+            vgrid_steps = rand_step
+            mh = hsize / hgrid_steps #m- stands for multiple
+            mv = vsize / vgrid_steps
+        rstep_size = size(rand_steps)[1]
+        mhs, mvs = size(mh)[1], size(mv)[1]
+        @toggled_assert (length(mhs) == length(mvs) == length(rstep_size))
+        end
+        #Here data is structured into the grid parameters and specifically model ones
+        Pdf = DataFrame(Names_of_parameters = ["Used Methods",
+            "Boundary conditions(Cartesian)", "Number of cells along axis(By default 100*100)"],
+            Params_Numbers = [used_methods, (boundary_h, boundary_v), (mhgrid, mvgrid)])
+        if multiple_parameter
+            num_multiparams = rstep_size
+            a, α = [3*i for i in a:a:num_multiparams*a], [0.3*j for j in α:α:num_multiparams*α]
+            @toggled_assert (length(a) == length(α) == length(rstep_size))
+            Pddf = DataFrame(Names_of_derived_parameters =[
+                "Time step τ", "Space step h", "Porosity m",
+                "Proportionality constant a","Degree dependence α"], quantities = [mv, mh, m, a, α])
+        else
+            Pddf = DataFrame(Names_of_derived_parameters =[
+                "Time step τ", "Space step h", "Porosity m",
+                "Proportionality constant a","Degree dependence α"], quantities = [τ, h, m, a, α])
+        end
+
+        mhgrid = [LD:hh:RD for hh in mh]
+        mvgrid = [LU:vv:RU for vv in mv]
+        (debug_output && println("\n$mhgrid and $mvgrid"))
+        return rstep_size, Pdf, Pddf
+    else
+        if hsize>=0 && vsize>=0
+            h = (hsize/Nh)
+            τ = (vsize/Mv)
+        else
+            h = -(hsize/Nh)
+            τ = -(vsize/Mv)
+        end
+        hgrid = LD:h:RD # dr
+        vgrid = LU:τ:RU # dr
+        if Nh<=20 && Mv <= 40
+            hticks = hgrid
+            vticks = LU:2*τ:RU
+        elseif Nh<= 100 && Mv <= 200
+            hticks = LD:5*h:RD
+            vticks = LU:10*τ:RU
+        elseif Nh<= 500  && Mv <= 500
+            hticks = LD:30*h:RD
+            vticks = LU:50*τ:RU
+        else
+            hticks = LD:70*h:RD
+            vticks = LU:100*τ:RU
+        end
+        (debug_output && println("\n$hgrid and $vgrid"))
+        #The simplest one-set default parameters and multiprams
+        Pdf = DataFrame(Names_of_parameters = ["Used Methods",
+            "Boundary conditions(Cartesian)", "Number of cells along axis(By default 100*100)"],
+            Params_Numbers = [used_methods, (boundary_h, boundary_v), (Nh, Mv)])
+        if multiple_parameter
+            num_multiparams = rstep_size
+            a, α = [3*i for i in a:a:num_multiparams*a], [0.3*j for j in α:α:num_multiparams*α]
+            @toggled_assert (length(a) == length(α) == length(rstep_size))
+            Pddf = DataFrame(Names_of_derived_parameters =[
+                "Time step τ", "Space step h", "Porosity m",
+                "Proportionality constant a","Degree dependence α"], quantities = [mv, mh, m, a, α])
+        #The only set of parameters and grid configuration
+        else
+            Pddf = DataFrame(Names_of_derived_parameters =[
+            "Time step τ", "Space step h", "Porosity m",
+            "Proportionality constant a","Degree dependence α", "hticks", "vticks"],
+            quantities = [τ, h, m, a, α, hticks, vticks])
+    end
+    return 1, Pdf, Pddf
+end
+
+#determine_initial_surface_shape(initial_shape, multiple_trials, NL_1, NH, MV, h, (LD, RD, LU, RU))
+function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials::Bool,
+    NL_1::Vector{Float64},  NH::Int64, MV::Int64, h::Float64,
+    LD, RD, LU, RU, hticks, vticks)
+    nd = ndigits(MV)
+    zeros_rep = repeat('0', nd - 1)
+    if !multiple_trials
+        hgrid = LD:h:RD # dr
+        vgrid = LU:τ:RU # dr
+        if initial_shape == 1
+            z::Float64 = 1.0
+            initial_const = z
+            @time for i in 1:NH
+            #print("I1: $i")
+                NL_1[i] = z
+            end
+            plot(hgrid, NL_1, c= :blue, label = "h(x) = $z at timestep = 1(from first up to $Mv)", xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5,
+            legend=:topleft)
+            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
+         elseif initial_shape == 2
+            Ru, Rd, Ld, Rd = RU^2, RD^2, LD^2, RD^2
+            R = max(Ru, Rd, Ld, Rd)
+            t = max(h, τ)
+            if !formula_init
+                 initial_const = 0.0
+                 center = if RD- LD >= 0
+                     (RD + LD)/2 # RD + LD
+                 else
+                     (RD - LD)/2
+                 end
+            NL_1[1] = initial_const
+            if isinteger(NH/2)
+                up_step = Int(NH/2)
+                NL_1[up_step] = R
+                mid_next = up_step + 1
+            else
+                up_step = floor(Int, NH/2)
+                NL_1[up_step+1] = R
+                mid_next = up_step + 1
+            end
+            @time for i in 2:(up_step)
+                print("I1: $i")
+                new_value = R - ((up_step - i) * t)^2
+                print("Step: $i, value: $new_value")
+                #new_value = sqrt(max(0, R^2 - i * h^2))
+                if new_value>=0
+                    NL_1[i] = sqrt(new_value)
+                else
+                    NL_1[i] = 0#sqrt(-new_value)
+                end
+            end
+            @time for j in mid_next:NH
+                #print("I1: $i")
+                new_value = R - ((j - up_step) * t)^2
+                if new_value>=0
+                    NL_1[j] = sqrt(new_value)
+                else
+                    NL_1[j] = 0#sqrt(-new_value)
+                end
+            end
+            NL_1[NH] = initial_const
+            plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",  xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
+            legend=:topleft)
+            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
+        else
+            if isinteger(NH/2)
+               Len = Int(NH/2)
+               u1 = range(LD, stop=0, length=Len)
+               u2 = range(0, stop=RD, length=Len)
+           else
+               Len = floor(NH/2)
+               u1 = range(LD, stop=0, length=Len)
+               u2 = range(0, stop=RD, length=Len+1)
+           end
+            v = range(LU, stop=RU, length=MV)
+            uu1 = -(collect(u1)^2 .- R)
+            uu2 = -(collect(u2)^2 .- R)
+            print(u,"\n", uu)
+            pause(4)
+            NL_1 = reduce(append!, (uu1, uu2), init=Float[])
+            plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",  xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
+            legend=:topleft)
+            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
+        end
+            #This defines only x axis and label refers to it's legend
+            #xticks=
+        elseif initial_shape == 3
+            normalDensity(z) = pdf(Normal(), z)
+            d0 = normalDensity.(hgrid)
+            d1 = derivative.(normalDensity, hgrid)
+            d2 = second_derivative.(normalDensity, hgrid)
+            NL_1 = d0
+            plot(hgrid, [d0 d1 d2], c=[:blue :red :green], label=[L"f(x)" L"f’(x)" L"f’’(x)"], xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
+            legend=:topleft)
+                #This defines only x axis and label refers to it's legend
+            NL_1 = d0
+            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
+        end
+    end
+    return NL_1
+end
+
+function wvec_layer(NL_2::Vector{Float64}, file_record_p::String,
+    timestep::Int64, delim = " & \n", last_time_step::Int64 = 10000, all_in_one_file = false)
+    euclid_norm::Float64 = 0.0
+    NS2::Int64 = 0
+    if timestep>1 && timestep < last_time_step
+        NS2 = size(NL_2)[1]
+        euclid_norm = euclidean(NL_2, zeros(NS2))
+        println("Norm of vector: $euclid_norm\t, the size of second layer: $NS2")
+    end
+    if isfile("Results/Layerh_$(timestep).txt") && all_in_one_file
         # Open file in append mode and then write to it
-        exampleFileIOStream =  open(initialshape_file_record,"a")
+        exampleFileIOStream =  open(file_record_p, "a")
         Base.close(exampleFileIOStream)
         #write(exampleFileIOStream, [NL_2]);
     else
-        open(initialshape_file_record, "w") do io
+        open(file_record_p, "w") do io
             writedlm(io, [NL_2], delim)
-            writedlm(io, ["Norm of result vector: $euclid_norm", "Size of NL_2: $NS2"]," & ")
+            if timestep>1
+                writedlm(io, ["Norm of result vector: $euclid_norm",
+                    "Size of NL_2: $NS2"]," & ")
+            end
         end
-    end;
-end
-#Simply for scaning data files
-function rdir(dir::AbstractString, pat::Glob.FilenameMatch)
-    result = String[]
-    for (root, dirs, files) in walkdir(dir)
-        append!(result, filter!(f -> occursin(pat, f), files), joinpath.(root, files))
     end
-    return result
 end
-rdir(dir::AbstractString, pat::AbstractString) = rdir(dir, Glob.FilenameMatch(pat))
+
+"""
+In one parameter set I need the following:
+- Two vectors for traversing the h, τ loops
+- one set each of primary_data and model_data
+- delimeter to write specifically results of traverses
+- file path for each horizontal traverse
+In multi-step configuration I would need the same, but
+- additionally instead of h, τ from model_data I will
+use their vector analogues
+If I want to use multi-parameter case(which may be with
+one-step or vector-step traverse) I will need to
+choose one that will be variable throughout the cycles.
+"""
 
 "Calculations within horizontal bypass approxiamation"
-function layer_fill!(NL_2::Vector{Float64}, NL_1::Vector{Float64},
-         Pdf::DataFrame, Pddf::DataFrame, timestep::Int64, initial_bc::Float64)
-    println("Pdf:   ", eltype.(eachcol(Pdf)))
-    println("Pddf:   ", eltype.(eachcol(Pddf)))
-    Nh::Int64, Mv::Int64 = Pdf[3, 2]
-    println("Grid size: $Nh * $Mv, Layer: $timestep")
-    τ, h, m, a, α = Pddf[1:5, 2]#parse(Vector{Float64}
+function symmetric_layer_fill!(NL_2::Vector{Float64}, NL_1::Vector{Float64}, timestep::Int64)
     Rel = τ/m
     println("\n Variable steps: $τ ", " and $h"," τ/m=", "$Rel")
     println("m: $m,\tProportionality constant a: $a,\tDegree of nonlinearity: $α")
@@ -81,135 +367,96 @@ function layer_fill!(NL_2::Vector{Float64}, NL_1::Vector{Float64},
     #Boundary conditions
     #NL_2[1], maxelem_index = findmax(NL_1)
     for j in 2:Nh
-        first_term = (NL_1[j+1]-NL_1[j])^deg_r/(a^deg_c* h^deg_r)
-        second_term = (NL_1[j]/(a^deg_c* h))*( (NL_1[j+1]-NL_1[j])/h )^deg_c
-        sech_derivative = (NL_1[j+1]-2*NL_1[j]+NL_1[j-1])/h^2
-        K = sech_derivative*NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l
-        (debug_output && println("Cautious at third term, : $K"))
-        third_term =  K/(α* a^deg_c* h^deg_l) #sech_derivative* NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l/(α* a^deg_c* h^deg_l)
-        println("First_term: $first_term\tSecond_term: $second_term\tThird_term: $third_term\nWith second derivative = $sech_derivative")
-        (debug_time_sleep && sleep(2))
-        NL_2[j] = Rel* (first_term- second_term- third_term) + NL_1[j]
-        res_next_layer = round(NL_2[j], digits=4)
-        println("NL_2[$j]: \t$res_next_layer")
+         first_term = (NL_1[j+1]-NL_1[j])^deg_r/(a^deg_c* h^deg_r)
+         second_term = (NL_1[j]/(a^deg_c* h))*( (NL_1[j+1]-NL_1[j])/h )^deg_c
+         sech_derivative = (NL_1[j+1]-2*NL_1[j]+NL_1[j-1])/h^2
+         K = sech_derivative*NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l
+         (debug_output && println("Cautious at third term, : $K, others are: $second_term, $first_term"))
+         third_term =  K/(α* a^deg_c* h^deg_l) #sech_derivative* NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l/(α* a^deg_c* h^deg_l)
+         println("First_term: $first_term\tSecond_term: $second_term\tThird_term: $third_term\nWith second derivative = $sech_derivative")
+         (debug_time_sleep && sleep(2))
+         if initial_shape != 2
+              NL_2[j] = Rel* (first_term- second_term- third_term) + NL_1[j]
+              res_next_layer = round(NL_2[j], digits=4)
+              println("NL_2[$j]: \t$res_next_layer")
+         else
+             res = Rel * (first_term- second_term- third_term) + NL_1[j]
+             if  res < 100.0 && res > -100.0
+                  NL_2[j] = res
+             else
+                 NL_2[j] = NL_2[(NH - j)]
+            end
+        end
      end
+     #Non-reflective conditions
      NL_2[NH]= deepcopy(NL_2[Nh])
      NL_2[1]= deepcopy(NL_2[2])
-    (debug_output && print("Second array after horizontal cross: $NL_2"))
-    println("The last element approxiamtion get used to be: $(NL_2[Nh])
-       and first boundary condition imply at previous layer step $initial_bc NL_2[1] = $(NL_2[1])")
-
-    initialshape_file_record = "Results/Layerh_$(timestep).txt"
-    wvec_layer(NL_2, initialshape_file_record, timestep)
-    #norm(NL_2) norm.(eachcol(NL_2))  f1(A,d=1) = sqrt.(sum(abs2,A,d))  f1(NL_2)
-    (debug_time_sleep && sleep(1))
-    (debug_output && print("Last step before return: $NL_2"))
-    return NL_2
+     (debug_output && print("Second array after horizontal cross: $NL_2"))
+     println("The last element approximation get used to be: $(NL_2[NH])
+            and first boundary condition imply at previous layer step NL_2[1] = $(NL_2[1])")
+     shape_file_record = joinpath("Results", "Layerh_$(timestep).txt")
+     #shape_file_record = "Results/Layerh_$(timestep).txt"
+     wvec_layer(NL_2, shape_file_record, timestep)
+     #norm(NL_2) norm.(eachcol(NL_2))  f1(A,d=1) = sqrt.(sum(abs2,A,d))  f1(NL_2)
+     (debug_time_sleep && sleep(1))
+     (debug_output && print("Last step before return: $NL_2"))
+     return NL_2
 end
 
-#Generate needed input parameters for scheme
-const Params_Number = 5
-used_methods::AbstractString = "fd"
-boundary_h = (-1, 1) #lb::Integer= , rb::Integer=
-boundary_v = (-1, 1)
-hgrid_steps::Vector{Int64} = []
-vgrid_steps::Vector{Int64} = []
-Nh, Mv::Int64= 50, 70
-# 2D point's scope
-LD, RD, LU, RU = Float64(boundary_h[1]), Float64(boundary_h[2]), Float64(boundary_v[1]), Float64(boundary_v[2])
-hsize = RD - LD
-vsize = RU - LU
-initial_step_value = 10
-step_max = 1000
-expiremntal_increase = step_max/5
-#Choose appropriate single/multiple step_sizes
-if hsize>=0 && vsize>=0
-    #Instead of Nh, Mv would be used hgrid_steps, vgrid_steps
-    if  multiple_trials && hsize >=1 && vsize >=1
-        rand_steps = [i for i in collect(initial_step_value:expiremntal_increase:step_max)]
-        hgrid_steps = hsize* rand_steps
-        vgrid_steps = vsize* rand_steps
-        mh = hsize / hgrid_steps
-        mv = vsize / vgrid_steps
-    elseif hsize <= 1 && vsize <= 1
-        step_max_red = hsize* step_max
-        expiremntal_increase = step_max_red
-        rand_steps = [i for i in collect(initial_step_value:expiremntal_increase:step_max)]
-        hgrid_steps = rand_steps
-        vgrid_steps = rand_step
-        mh = hsize / hgrid_steps #m- stands for multiple
-        mv = vsize / vgrid_steps
+#Let's start from the first one
+function axisymmetric_parabolic_scheme(u::Array{Float64, 2}, #timesteps::Integer,
+    Pdf::DataFrame, Pddf::DataFrame, uprev::Vector{Float64}, unew::Vector{Float64},
+    initial_shape::Int64)
+    simple_one_prmset = !multiple_trials && !multiple_parameter
+    println("Pdf:   ", eltype.(eachcol(Pdf)))
+    println("Pddf:   ", eltype.(eachcol(Pddf)))
+
+    # 2D point's scope
+    LD, RD, LU, RU = Float64(boundary_h[1]), Float64(boundary_h[2]), Float64(boundary_v[1]), Float64(boundary_v[2])
+    #This case determine the one-parameter set with 4-point stencil
+    if simple_one_prmset
+        Nh::Int64, Mv::Int64 = Pdf[3, 2]
+        println("Grid size: $Nh * $Mv")
+        τ, h, m, a, α = Pddf[1:5, 2]#parse(Vector{Float64}
+        hgrid = LD:h:RD # dr
+        vgrid = LU:τ:RU # dr
+        @time for i in 2:Mv
+            (debug_output && print("Layer $i\t"))
+            println("Before passing over to horizontal tour: layer NL_1 = ", uprev,"\nlayer NL_2 = ", unew)
+            unew = symmetric_layer_fill!(unew, uprev, i)
+            u[i, :] = deepcopy(unew)
+            #w[i] = NL_2
+            uprev = deepcopy(unew)
+            unew[:] .= 0.0
+            #print(hticks, vticks)
+            #sleep(2)
+            #, xticks= hticks, yticks = vticks, marker=:xcross, xlims= (LD, RD),ylims= (-LU, RU)
+            plot(hgrid, u[i, :], c = :blue, label = "h(x) = z at timestep $i")
+            plot!(hgrid, unew, label = "NL_2 at timestep $i");
+                nd = ndigits(MV)
+                ni = ndigits(i)
+                zeros_rep = repeat('0', nd - ni)
+            spfig(initial_shape, fig_dir, zeros_rep, i ,debug_output, save_hfig)
+        end
     end
-    print((hsize/Nh), "  _  ", (vsize/Mv))
-    h = (hsize/Nh)
-    #time step
-    τ =(vsize/Mv)
-elseif hsize< 0 && vsize< 0
-    if  multiple_trials && hsize <= -1 && vsize  <= -1
-        hsize = min(0,- hsize)
-        vsize = min(0,- vsize)
-        rand_steps = [i for i in collect(initial_step_value:expiremntal_increase:step_max)]
-        hgrid_steps = hsize* rand_steps
-        vgrid_steps = vsize* rand_steps
-        mh = hsize / hgrid_steps
-        mv = vsize / vgrid_steps
-    elseif hsize >= -1 && vsize >= -1
-        hsize = min(0,- hsize)
-        vsize = min(0,- vsize)
-        step_max_red = hsize* step_max
-        expiremntal_increase = step_max_red
-        rand_steps = [i for i in collect(initial_step_value:expiremntal_increase:step_max)]
-        hgrid_steps = rand_steps
-        vgrid_steps = rand_step
-        mh = hsize / hgrid_steps #m- stands for multiple
-        mv = vsize / vgrid_steps
-    end
-    h = -(hsize/Nh)
-    τ = -(vsize/Mv)
 end
-if multiple_trials
-    mhgrid = [LD:hh:RD for hh in mh]
-    mvgrid = [LU:vv:RU for vv in mv]
-    (debug_output && println("\n$mhgrid and $mvgrid"))
-else
-    hgrid = LD:h:RD # dr
-    vgrid = LU:τ:RU # dr
-    if Nh<=20 && Mv <= 40
-        hticks = hgrid
-        vticks = LU:2*τ:RU
-    elseif Nh<= 100 && Mv <= 200
-        hticks = LD:5*h:RD
-        vticks = LU:20*τ:RU
-    elseif Nh<= 500  && Mv <= 500
-        hticks = LD:50*h:RD
-        vticks = LU:50*τ:RU
+
+function spfig(initial_shape::Int64, fig_dir::String, zeros_rep::String, i::Int64 ,debug_output::Bool = true, save_hfig::Bool = true)
+    if initial_shape in 1:3 && save_hfig
+        if initial_shape == 1
+            fig_path = joinpath(fig_dir, "plane_$zeros_rep$i.png")
+        elseif initial_shape == 2
+            fig_path = joinpath(fig_dir, "sphere_$zeros_rep$i.png")
+        elseif initial_shape == 3
+            fig_path = joinpath(fig_dir, "gauss_uniform_distribution_$zeros_rep$i.png")
+        end
+        savefig(fig_path)
+    elseif !(initial_shape in 1:3)
+        (debug_output && print("Released shapes are from 1 up to 3"))
     else
-        hticks = LD:100*h:RD
-        vticks = LU:100*τ:RU
+        plot()
     end
-    (debug_output && println("\n$hgrid and $vgrid"))
 end
-
-initial_shape = 3
-#Symbolic variables used in multistep discretisized grid for
-#parabolic equation
-Params_Numbers = "Params_Number_$Params_Number"
-println(Params_Numbers)
-#@vars h #the unknown free surface of the fluid stream
-#constant(linear proportionality) and the parameter
-#indicating the degree of the speed upon nonlinear dependence
-a, α = 3, 0.2
-#Convinience parameter and specifying porosity(constant (porosity))
-m = 1
-
-# Generate random problem data
-Symbolics.@variables A[1:Nh, 1]
-A = rand(1:10, Nh, Mv)
-
-# Create a (column vector) variable of size n x 1.
-Symbolics.@variables b = randn(Mv, 1)
-#grid = CartesianGrid(dims)
-
 #Now lets read file data or leave the default ones
 initial_dir = abspath("C:/Users/2020/Desktop/CurrentReading/AsideMy/RCJsPyJulia_projects/ConcreteFluidSystem/ParabolicEquation")
 if pwd() == "C:\\Users\\2020" && Sys.iswindows()
@@ -217,155 +464,115 @@ if pwd() == "C:\\Users\\2020" && Sys.iswindows()
     #cd("C:/Users/2020")
 end
 println("\nCurrent directory with program: \n", pwd())
+#------------------------------------------------------------------------------------------------------------------
 
-primary_data = Dict("used_methods" => "fd", "boundary" => Dict("boundary_h"=>Nh,"boundary_v"=>Mv),
-            "number_of_steps" => Dict("NX"=>Nh,"NY"=>Mv))
-model_data = Dict("proportionality_constant" => a, "model_degree" => α,
-            "porosity" => m)
+mt, Pdf, Pddf = choose_numgrid(multiple_trials, hsize, vsize,
+     initial_step_value, expiremntal_increase, step_max)
 
-# pass data as a json string (how it shall be displayed in a file)
-string_primary_data = JSON.json(primary_data)
-# write the file with the stringdata variable information
-all_data_files = rdir(initial_dir, "*data*.txt")
-#sort(readdir("."); by=f->stat(f).inode)
-#df = glob("data*.txt"i) || glob("*data*.txt"i)
-rprimary_data = Dict()
-ndf = size(all_data_files)[1]
-println("The acquired files: $all_data_files, \nWith size: $ndf")
-if ndf == 1
-    fn = all_data_files[1]
-    println("File found in the current directory: $fn")
-    open(fn, "r") do f
-        global rprimary_data
-        dicttxt = readall(all_data_files)  # file information to string
-        rprimary_data= JSON.parse(dicttxt)  # parse and transform data
-    end
-elseif ndf == 0
-    print("There are no files in directory")
-elseif ndf >=1
-    for (i, file) in enumerate(all_data_files)
-         mv(file, "$file_$i.txt")
-    end
-end
-
-#Here data is structured into the grid parameters and specifically model ones
-if multiple_trials
-    Pdf = DataFrame(Names_of_parameters = ["Used Methods",
-        "Boundary conditions(Cartesian)", "Number of cells along axis(By default 100*100)"],
-        Params_Numbers = [used_methods, (boundary_h, boundary_v), (mhgrid, mvgrid)])
-    Pddf = DataFrame(Names_of_derived_parameters =[
-        "Time step τ", "Space step h", "Porosity m",
-        "Proportionality constant a","Degree dependence α"], quantities = [mv, mh, m, a, α])
-else
-    Pdf = DataFrame(Names_of_parameters = ["Used Methods",
-        "Boundary conditions(Cartesian)", "Number of cells along axis(By default 100*100)"],
-        Params_Numbers = [used_methods, (boundary_h, boundary_v), (Nh, Mv)])
-    Pddf = DataFrame(Names_of_derived_parameters =[
-        "Time step τ", "Space step h", "Porosity m",
-        "Proportionality constant a","Degree dependence α"], quantities = [τ, h, m, a, α])
-end
 println("Pdf:   ", eltype.(eachcol(Pdf)))
 println("Pddf:   ", eltype.(eachcol(Pddf)))
 CSV.write("string_primary_data.csv", Pdf)
 CSV.write("model_data.csv", Pddf)
 (debug_time_sleep && sleep(1))
-#Initialization of used array variables
-NH = Nh + 1 #As needed for grid including both ends
-MV = Mv + 1
-NL = zeros(2, NH)
-NL[1, 1:NH] .= 0.0
-NL[2, :] .= 0.0
-NL_1 = NL[1, :] #Passed by reference
-NL_2 = NL[2, :]
-(debug_time_sleep && println("NL: $NL, \nNL_1 and NL_2: $NL_1 and $NL_2 "))
-#Now i need to initialize shape of my surface and mesh grid also
-#SW = Point(LD, 0.0)
-#SE = Point(1.0, 0.0)
-#NW = Point(0.0, 1.0)
-#NE = Point(1.0, 1.0)
-dims = (MV, NH) # can pass in a 1-Tuple, a 2-Tuple or a 3-Tuple
-num_nodes = prod(dims)
-u = zeros(MV, NH)
-w = Nodes(Dual, dims)
 
-@macroexpand @nref 2 NL i
+#Come into play in multvariable case
+Base.@kwdef mutable struct MPS
+    #Multistep form
+        SLs::Array{Float64, 2} = zeros(Float64, mt, NH)
+        SRs::Array{Float64, 2} = zeros(Float64, mt, MV)
+    #Multiparameter separate form
+        PLs::Array{Float64, 2} = zeros(Float64, num_multiparams, NH)
+        PRs::Array{Float64, 2} = zeros(Float64, num_multiparams, MV)
+end
+function Base.getproperty(mps::MPS, p::Symbol)
+    if p == :sls
+        return getfield(mps, :SLs)   # getfield() reads fields directly and it cannot be overloaded
+    elseif p == :srs
+        return getfield(mps, :SRs)
+    elseif p == :pls
+        return getfield(mps, :PLs)
+    elseif p == :prs
+        return getfield(mps, :PRs)
+    else
+        return getfield(mps, p)
+    end
+end
+
+if multiple_trials || multiple_parameter
+    MPS_ = MPS()
+end
+
+if !multiple_trials
+    #Initialization of used array variables
+    NH = Nh + 1 #As needed for grid including both ends
+    MV = Mv + 1
+    NL = zeros(2, NH)
+    NL[1, 1:NH] .= 0.0
+    NL[2, :] .= 0.0
+    NL_1 = NL[1, :] #Passed by reference
+    NL_2 = NL[2, :]
+    (debug_time_sleep && println("NL: $NL, \nNL_1 and NL_2: $NL_1 and $NL_2 "))
+
+    #Now i need to initialize shape of my surface and mesh grid also
+    #SW = Point(LD, 0.0)
+    #SE = Point(1.0, 0.0)
+    #NW = Point(0.0, 1.0)
+    #NE = Point(1.0, 1.0)
+    dims = (MV, NH) # can pass in a 1-Tuple, a 2-Tuple or a 3-Tuple
+    num_nodes = prod(dims)
+    u = zeros(MV, NH)
+    w = Nodes(Dual, dims)
+    primary_data = Dict{String, Any}("used_methods" => "fd", "boundary" => Dict("boundary_h"=>Nh,"boundary_v"=>Mv),
+                "number_of_steps" => Dict("NX"=>Nh, "NY"=>Mv))
+    #Extract some for initialization step
+    if multiple_parameter
+        model_data = Dict("proportionality_constant" => [a * j for j in a:a:num_multiparams*a], "model_degree" => [α * i for i in α:α:num_multiparams*α],
+                    "porosity" => m)
+
+    else
+        model_data = Dict{String, Float64}("proportionality_constant" => a, "model_degree" => α,
+                    "porosity" => m)
+    end
+elseif !multiple_parameter
+    primary_data[] = Dict("used_methods" => "fd", "boundary" => Dict("boundary_h"=>Nh,"boundary_v"=>Mv),
+                "number_of_steps" => Dict("NX"=>Nh, "NY"=>Mv))
+    model_data = Dict("proportionality_constant" => a, "model_degree" => α,
+                "porosity" => m)
+else
+    if multiple_parameter
+
+end
+
+#Symbolic variables used in multistep discretisized grid for
+#parabolic equation
+Params_Numbers = "Params_Number_$Params_Number"
+println(Params_Numbers)
+#@vars h #the unknown free surface of the fluid stream
+
+# Generate random problem data
+Symbolics.@variables A[1:Nh, 1]
+A = rand(1:10, Nh, Mv)
+rprimary_data, ndf = model_data_in_dir(primary_data, initial_dir)
+# Create a (column vector) variable of size n x 1.
+Symbolics.@variables b = randn(Mv, 1)
+#grid = CartesianGrid(dims)
+#To initialize h(r,t) I need the following: NH, MV, h
+if !multiple_trials
+    local Nh::Int64, Mv::Int64 = Pdf[3, 2]
+    println("Grid size: $Nh * $Mv")
+    τ, h= Pddf[1:2, 2]
+    hticks, vticks= Pddf[6:7, 2]
+    #Here stuck!
+    NL_1= determine_initial_surface_shape!(initial_shape, multiple_trials, NL_1,
+    NH, MV, h, LD, RD, LU, RU, hticks, vticks)
+    initialshape_file_record = "Results/Layerh_1.txt"
+    delim = " & \n"
+    wvec_layer(NL_1, initialshape_file_record, 1, delim)
+    plot()
+end
 #Shape of surface, starts with 1
 delta_axis = 0.01
 initial_const = 0.0
-
-if initial_shape == 1
-    z::Float64 = 1.0
-    initial_const = z
-    @time for i in 1:NH
-        #print("I1: $i")
-        NL_1[i] = z
-    end
-    plot(hgrid, NL_1, c= :blue, label = "h(x) = $z at timestep = 1(from first up to $Mv)")
-    plot!([-LD,RD], [0,0], color=:black, lw=0.5, xlabel="r",
-    xlims= (LD+ delta_axis, RD+ delta_axis), ylims= (LU+ delta_axis, RU+ delta_axis),
-    label="", legend=:topleft)
-elseif initial_shape == 2
-    print("In progress")
-    R = max(RU^2, RD^2)
-    center = if RD- LD >= 0
-        (RD+ LD)/2
-    else
-        (RD- LD)/2
-    end
-    initial_const = 0.0
-    NL_1[1] = 0.0
-    up_step = floor(Int, NH/2)
-    @time for i in 2:(up_step+1)
-        #print("I1: $i")
-        new_value = R^2 - ((up_step - i) * h )^2
-        print("Step: $i, value: $new_value")
-        #new_value = sqrt(max(0, R^2 - i * h^2))
-        if new_value>=0
-            NL_1[i] = sqrt(new_value)
-        else
-            NL_1[i] = 0#sqrt(-new_value)
-        end
-    end
-    @time for i in up_step:NH
-        #print("I1: $i")
-        new_value = R^2 - ((i - up_step) * h)^2
-        if new_value>=0
-            NL_1[i] = sqrt(new_value)
-        else
-            NL_1[i] = 0#sqrt(-new_value)
-        end
-    end
-    plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)", legend=:topleft)
-    #This defines only x axis and label refers to it's legend
-    #xticks=
-    plot!([-LD,RD], [0,0], color=:black, lw=0.5, xlabel="r", xlims=(LD, RD), ylims= (LU, RU), label="",
-    xticks= hticks, yticks = vticks, minorgridlinewidth = h);
-    if save_hfig
-        global fig_path = joinpath(fig_dir, "Sphere_1.png")
-        savefig(fig_path)
-    else
-        plot()
-    end
-elseif initial_shape == 3
-    normalDensity(z) = pdf(Normal(), z)
-    d0 = normalDensity.(hgrid)
-    d1 = derivative.(normalDensity, hgrid)
-    d2 = second_derivative.(normalDensity, hgrid)
-    plot(hgrid, [d0 d1 d2], c=[:blue :red :green], label=[L"f(x)" L"f’(x)" L"f’’(x)"], legend=:topleft)
-    #This defines only x axis and label refers to it's legend
-    #xticks=
-    plot!([-LD,RD], [0,0], color=:black, lw=0.5, xlabel="r", xlims=(LD, RD), ylims= (LU, RU), label="",xticks= hticks, yticks = vticks, minorgridlinewidth = h);
-    NL_1 = d0
-    if save_hfig
-        global fig_path = joinpath(fig_dir, "gaussian_uniform_1.png")
-        savefig(fig_path)
-    else
-        plot()
-    end
-end
-initialshape_file_record = "Results/Layerh_1.txt"
-delim = " & \n"
-wvec_layer(NL_1, initialshape_file_record, 1, delim)
 
 #print(u[1], "\n" , NL_1)
 #println(typeof(u), "And NL_1: \n", typeof(NL_1))
@@ -374,35 +581,9 @@ u[1, :]= deepcopy(NL_1)
 w[1, :]= deepcopy(NL_1)
 println("By reference?: $(NL_1 == NL[1])")
 
-initial_bc = NL_1[1]
-@time for i in 2:Mv-1
-    global NL_2, NL_1, LD, RD, LU, RU, initial_bc, fig_path
-    (debug_output && print("$i- timestep\t"))
-    println("Before passing over to horizontal tour: layer NL_1 = ", NL_1,"\nlayer NL_2 = ", NL_2)
-    NL_2 = layer_fill!(NL_2, NL_1, Pdf, Pddf, i, initial_bc)
-    u[i, :] = deepcopy(NL_2)
-    #w[i] = NL_2
-    NL_1 = deepcopy(NL_2)
-    initial_bc = NL_1[1]
-    NL_2[:] .= 0.0
-    #Write vector result
-    plot(hgrid, NL_1, c = :blue, label = "h(x) = z at timestep $i")
-    plot!(hgrid, NL_2, c = :brown, marker=:xcross, xlims= (LD+ delta_axis, RD+ delta_axis), ylims= (-1,1),xticks= hticks, yticks = vticks,
-    ms=6, msw=0, label = "NL_2 at timestep $i", legend=:topleft);
-    if initial_shape in 1:3 && save_hfig
-        if initial_shape == 1
-            fig_path = joinpath(fig_dir, "plane_$i.png")
-        elseif initial_shape == 2
-            fig_path = joinpath(fig_dir, "sphere_$i.png")
-        elseif initial_shape == 3
-            fig_path = joinpath(fig_dir, "gauss_uniform_distribution_$i.png")
-        end
-        savefig(fig_path)
-    elseif !(initial_shape in 1:3)
-        (debug_time_sleep && print("Released shapes are from 1 up to 3"))
-    else
-        plot()
-    end
-    print("Layer i= $i, value= $NL_1")
-end
+#symmetric_layer_fill!(NL_2, NL_1, 2)
+axisymmetric_parabolic_scheme(u, #timesteps::Integer,
+    Pdf, Pddf, NL_1, NL_2, initial_shape)
+
+@macroexpand @nref 2 NL i
 #Additionly create plots from the resulting 2-dim massive
