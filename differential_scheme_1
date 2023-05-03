@@ -1,5 +1,5 @@
 #Symbolic representation of derivatives, etc.
-using SymEngine
+using SymEngine, BenchmarkTools
 using CartesianGrids, Base.Cartesian #Meshes,Convex
 using Distributions, LinearAlgebra, Distances, Calculus, SpecialFunctions, LaTeXStrings
 using Printf, DataFrames, DelimitedFiles
@@ -26,12 +26,13 @@ println("PROGRAM_FILE=", PROGRAM_FILE)
 
 
 const real = true
-const multiple_parameter = true
+multiple_parameter = false
 const debug_time_sleep = false
 const debug_output = true
-const formula_init = false
+formula_init = false
 const multiple_trials = false
 const save_hfig = true
+const stable_var = false
 fig_dir = "C:\\Users\\2020\\Desktop\\CurrentReading\\AsideMy\\Coursework\\FlatNonNewtonFlowProblem\\Images\\IterationShapes"
 
 #Generate necessary input parameters for the scheme
@@ -52,11 +53,13 @@ const vsize = RU - LU
 const initial_step_value::Int64 = 10
 const step_max::Int64 = 1000
 const expiremntal_increase = floor(Int64, step_max/5)
+vara = 3
+varalpha = 0.3
 #constant(linear proportionality) and the parameter
 #indicating the degree of the speed upon nonlinear dependence
-a, α = 3, 1.2
+a, α = 3, 0.3
 #Convinience parameter and specifying porosity(constant (porosity))
-m = 1
+m = 0.1
 
 
 
@@ -69,6 +72,17 @@ function rdir(dir::AbstractString, pat::Glob.FilenameMatch)
     return result
 end
 rdir(dir::AbstractString, pat::AbstractString) = rdir(dir, Glob.FilenameMatch(pat))
+
+function arithmetic_prolong(num, av, alphav, vara = 3, varalpha = 0.3)
+    if !stable_var
+        am = [av * j for j in av:av:num_multiparams*av]
+        alpham = [alphav * i for i in alphav:alphav:num_multiparams*alphav]
+    else
+        am = [vara * j for j in av:av:num_multiparams*av]
+        alpham = [varalpha * i for i in alphav:alphav:num_multiparams*alphav]
+    end
+    return am, alpham
+end
 
 function model_data_in_dir(primary_data, initial_dir)
     # pass data as a json string (how it shall be displayed in a file)
@@ -89,7 +103,7 @@ function model_data_in_dir(primary_data, initial_dir)
             rprimary_data= JSON.parse(dicttxt)  # parse and transform data
         end
     elseif ndf == 0
-        print("There are no files in directory")
+        println("There are no files in directory")
     elseif ndf >=1
         for (i, file) in enumerate(all_data_files)
              mv(file, "$file_$i.txt")
@@ -147,21 +161,21 @@ function choose_numgrid(multiple_trials::Bool, hsize, vsize, initial_step_value,
             vgrid_steps = rand_step
             mh = hsize / hgrid_steps #m- stands for multiple
             mv = vsize / vgrid_steps
-        rstep_size = size(rand_steps)[1]
-        mhs, mvs = size(mh)[1], size(mv)[1]
-        @toggled_assert (length(mhs) == length(mvs) == length(rstep_size))
-        end
+            rstep_size = size(rand_steps)[1]
+            mhs, mvs = size(mh)[1], size(mv)[1]
+            @toggled_assert (length(mhs) == length(mvs) == length(rstep_size))
+            end
         #Here data is structured into the grid parameters and specifically model ones
         Pdf = DataFrame(Names_of_parameters = ["Used Methods",
             "Boundary conditions(Cartesian)", "Number of cells along axis(By default 100*100)"],
             Params_Numbers = [used_methods, (boundary_h, boundary_v), (mhgrid, mvgrid)])
         if multiple_parameter
             num_multiparams = rstep_size
-            a, α = [3*i for i in a:a:num_multiparams*a], [0.3*j for j in α:α:num_multiparams*α]
+            am, αm = arithmetic_prolong(num, a, α, vara, varalpha)
             @toggled_assert (length(a) == length(α) == length(rstep_size))
             Pddf = DataFrame(Names_of_derived_parameters =[
                 "Time step τ", "Space step h", "Porosity m",
-                "Proportionality constant a","Degree dependence α"], quantities = [mv, mh, m, a, α])
+                "Proportionality constant a","Degree dependence α"], quantities = [mv, mh, m, am, αm])
         else
             Pddf = DataFrame(Names_of_derived_parameters =[
                 "Time step τ", "Space step h", "Porosity m",
@@ -202,17 +216,19 @@ function choose_numgrid(multiple_trials::Bool, hsize, vsize, initial_step_value,
             Params_Numbers = [used_methods, (boundary_h, boundary_v), (Nh, Mv)])
         if multiple_parameter
             num_multiparams = rstep_size
-            a, α = [3*i for i in a:a:num_multiparams*a], [0.3*j for j in α:α:num_multiparams*α]
+            #Types changed if a, alpha!
+            am, αm = arithmetic_prolong(num, a, α, vara, varalpha)
             @toggled_assert (length(a) == length(α) == length(rstep_size))
             Pddf = DataFrame(Names_of_derived_parameters =[
                 "Time step τ", "Space step h", "Porosity m",
-                "Proportionality constant a","Degree dependence α"], quantities = [mv, mh, m, a, α])
+                "Proportionality constant a","Degree dependence α"], quantities = [mv, mh, m, am, αm])
         #The only set of parameters and grid configuration
         else
             Pddf = DataFrame(Names_of_derived_parameters =[
             "Time step τ", "Space step h", "Porosity m",
             "Proportionality constant a","Degree dependence α", "hticks", "vticks"],
             quantities = [τ, h, m, a, α, hticks, vticks])
+        end
     end
     return 1, Pdf, Pddf
 end
@@ -297,8 +313,9 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
             print(u,"\n", uu)
             pause(4)
             NL_1 = reduce(append!, (uu1, uu2), init=Float[])
-            plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",  xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
-            legend=:topleft)
+            plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",  xlims= (LD, RD), xlabel="r",
+                ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
+                legend=:topleft)
             spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
         end
             #This defines only x axis and label refers to it's legend
@@ -328,12 +345,14 @@ function wvec_layer(NL_2::Vector{Float64}, file_record_p::String,
         euclid_norm = euclidean(NL_2, zeros(NS2))
         println("Norm of vector: $euclid_norm\t, the size of second layer: $NS2")
     end
-    if isfile("Results/Layerh_$(timestep).txt") && all_in_one_file
+    if isfile(file_record_p) && all_in_one_file
         # Open file in append mode and then write to it
         exampleFileIOStream =  open(file_record_p, "a")
         Base.close(exampleFileIOStream)
         #write(exampleFileIOStream, [NL_2]);
     else
+        print("Opening $file_record_p")
+        print(pwd())
         open(file_record_p, "w") do io
             writedlm(io, [NL_2], delim)
             if timestep>1
@@ -483,6 +502,9 @@ Base.@kwdef mutable struct MPS
     #Multiparameter separate form
         PLs::Array{Float64, 2} = zeros(Float64, num_multiparams, NH)
         PRs::Array{Float64, 2} = zeros(Float64, num_multiparams, MV)
+    #Other changable const
+        ALs::Array{Float64, 2} = zeros(Float64, num_multiparams, NH)
+        ARs::Array{Float64, 2} = zeros(Float64, num_multiparams, MV)
 end
 function Base.getproperty(mps::MPS, p::Symbol)
     if p == :sls
@@ -493,6 +515,10 @@ function Base.getproperty(mps::MPS, p::Symbol)
         return getfield(mps, :PLs)
     elseif p == :prs
         return getfield(mps, :PRs)
+    elseif p == :als
+        return getfield(mps, :ALs)
+    elseif p == :ars
+        return getfield(mps, :ARs)
     else
         return getfield(mps, p)
     end
@@ -526,9 +552,11 @@ if !multiple_trials
                 "number_of_steps" => Dict("NX"=>Nh, "NY"=>Mv))
     #Extract some for initialization step
     if multiple_parameter
-        model_data = Dict("proportionality_constant" => [a * j for j in a:a:num_multiparams*a], "model_degree" => [α * i for i in α:α:num_multiparams*α],
+        am = [a * j for j in a:a:num_multiparams*a]
+        alpham = [α * i for i in α:α:num_multiparams*α]
+        model_data = Dict("proportionality_constant" => am, "model_degree" => alpham,
                     "porosity" => m)
-
+        MPS_.als, MPS_.pls = alpham
     else
         model_data = Dict{String, Float64}("proportionality_constant" => a, "model_degree" => α,
                     "porosity" => m)
@@ -538,8 +566,8 @@ elseif !multiple_parameter
                 "number_of_steps" => Dict("NX"=>Nh, "NY"=>Mv))
     model_data = Dict("proportionality_constant" => a, "model_degree" => α,
                 "porosity" => m)
-else
-    if multiple_parameter
+#else #Fixed step number
+    #if multiple_parameter
 
 end
 
