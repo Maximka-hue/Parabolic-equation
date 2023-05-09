@@ -114,7 +114,7 @@ function variables_from_txt(txt_file::AbstractString, prpk::ParametersPack{Float
         return prpk
     else
         print("Something ... mmm, not written maybe?")
-        return nothing
+        #return nothing
     end
 end
 #Support for inplace copying.
@@ -138,6 +138,15 @@ function init_from_files()
     #all found varying parameters
     #for (i, (name, value)) in enumerate(each_varn)
     #    all_prpk[i] =
+    for i in read_parameters(pwd(), "*modes.txt")
+        if endswith(i, "modes.txt")
+            println(endswith(i, "modes.txt"), "  third")
+            modes_ = variables_from_txt(i, prpk, "MODE")
+            println("prpk.chosen_modes  .... $prpk.chosen_modes")
+        end
+    end
+
+    println("Need :multiple_parameters for chose of variables_file, $(prpk.chosen_modes[:multiple_parameters])")
     for i in read_parameters()
        println("txt in outside loop: $i")
        if endswith(i, "pathmode.txt")
@@ -147,24 +156,24 @@ function init_from_files()
            println(endswith(i, "variablemode.txt"), "  second.m")
            variables_, each_varn = variables_from_txt(i, prpk, "VARIABLE")
            println("$variables_ ...\n $each_varn")
-       elseif endswith(i, "variablemode.txt")
+       elseif endswith(i, "variablemode.txt") && !prpk.chosen_modes[:multiple_parameters]
            variables_, each_varn = variables_from_txt(i, prpk, "VARIABLE")
            println("$variables_ ...\n $each_varn")
-       elseif endswith(i, "mode.txt")
-           println(endswith(i, "mode.txt"), "  third")
-           modes_ = variables_from_txt(i, prpk, "MODE")
        else
            print("Reading txt_files")
        end
    end
    println("Chosen Modes will be: ", collect(values(prpk.chosen_modes)))
-   control_b, params_num = length(prpk.chosen_modes), length(prpk.initial_model_values)
+   control_bs, params_nums = length(prpk.chosen_modes), length(prpk.initial_model_values)
    pts = prpk.dir_paths
+   prpk.params_num = params_nums
+   prpk.control_b = control_bs
    #I want to set number of parameters additionally
    new_prpk = ParametersPack{Float64}()
    copy!(new_prpk, prpk)#ParametersPack{Float64}(prpk.initial_model_values, params_num, control_b, pts)
-   print(new_prpk, "\n", prpk)
+   println(new_prpk, "\n", prpk)
     #dst.chosen_modes
+    return prpk
 end
 
 
@@ -192,6 +201,7 @@ rdir(dir::AbstractString, pat::Glob.FilenameMatch) = rdir(dir, Glob.FilenameMatc
 stdrdir(dir::AbstractString, pat::AbstractString) = stdrdir(dir, Glob.FilenameMatch(pat)) #the same as above
 
 function read_parameters(dir::AbstractString  = pwd(), pat::AbstractString = raw"*mode.txt", read_std = true)
+    #Default to all but modes file, so I additionaly indicate this point
     all_files = Vector{String}
     if read_std
     println("Standart parameters reading")
