@@ -23,6 +23,16 @@ mutable struct ParametersPack{T}
     dir_paths::Vector{String}
 end
 
+#Support for inplace copying.
+import Base.copy!
+function copy!(dst::ParametersPack, src::ParametersPack)
+    dst.initial_model_values = src.initial_model_values
+    dst.chosen_modes = src.chosen_modes
+    dst.params_num = src.params_num
+    dst.control_b = src.control_b
+    dst.dir_paths = src.dir_paths
+end
+
 ParametersPack{T}() where {T}= ParametersPack(Dict{String, T}(),  Dict{Symbol, Bool}(), convert(Int16, 0), convert(Int16, 0), Vector{String}())
 ParametersPack{T}(iparams_num, icontrol_b, idir_paths) where {T} = ParametersPack(Dict{String, T}(),  Dict{Symbol, Bool}(), iparams_num, icontrol_b, idir_paths)
 #ParametersPack(N, iparams_num, icontrol_b, idir_paths) = ParametersPack(Array{Float64,1}(undef, N),  Dict{Symbol, Bool}(), iparams_num, icontrol_b, idir_paths)
@@ -117,12 +127,6 @@ function variables_from_txt(txt_file::AbstractString, prpk::ParametersPack{Float
         #return nothing
     end
 end
-#Support for inplace copying.
-import Base.copy!
-function copy!(dst::ParametersPack, src::ParametersPack)
-    dst.initial_model_values = src.initial_model_values
-    dst.chosen_modes = src.chosen_modes
-end
 
 function init_from_files()
     #Default values
@@ -133,6 +137,7 @@ function init_from_files()
     paths_ = Vector{String}
     modes_ = Vector{Bool}
     variables_ = Vector{Int64}
+    each_varying = Dict{String, Vector{Float64}}()
     prpk = ParametersPack{Float64}()
     #Finally I am creating coies of my ParametersPack with
     #all found varying parameters
@@ -154,26 +159,22 @@ function init_from_files()
            paths_ = variables_from_txt(i, prpk, "PATH")
        elseif endswith(i, "variablesmode.txt") && prpk.chosen_modes[:multiple_parameters]
            println(endswith(i, "variablemode.txt"), "  second.m")
-           variables_, each_varn = variables_from_txt(i, prpk, "VARIABLE")
-           println("$variables_ ...\n $each_varn")
+           variables_, each_varying = variables_from_txt(i, prpk, "VARIABLE")
+           println("$variables_ ...\n $each_varying")
        elseif endswith(i, "variablemode.txt") && !prpk.chosen_modes[:multiple_parameters]
-           variables_, each_varn = variables_from_txt(i, prpk, "VARIABLE")
+           variables_ = variables_from_txt(i, prpk, "VARIABLE")
            println("$variables_ ...\n $each_varn")
        else
            print("Reading txt_files")
        end
    end
-   println("Chosen Modes will be: ", collect(values(prpk.chosen_modes)))
-   control_bs, params_nums = length(prpk.chosen_modes), length(prpk.initial_model_values)
-   pts = prpk.dir_paths
-   prpk.params_num = params_nums
-   prpk.control_b = control_bs
-   #I want to set number of parameters additionally
-   new_prpk = ParametersPack{Float64}()
-   copy!(new_prpk, prpk)#ParametersPack{Float64}(prpk.initial_model_values, params_num, control_b, pts)
-   println(new_prpk, "\n", prpk)
-    #dst.chosen_modes
-    return prpk
+    println("Chosen Modes will be: ", collect(values(prpk.chosen_modes)))
+    control_bs, params_nums = length(prpk.chosen_modes), length(prpk.initial_model_values)
+    pts = prpk.dir_paths
+    #I want to set number of parameters additionally
+    prpk.params_num = params_nums
+    prpk.control_b = control_bs
+    return prpk, each_varying
 end
 
 
