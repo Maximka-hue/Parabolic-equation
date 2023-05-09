@@ -1,7 +1,7 @@
 using Parameters, Glob, LinearAlgebra, ModelingToolkit#Symbols in dict use @variables
 #Don't forget: clear the Workspace from the Console by pressing Ctrl+D to end Julia and Enter to start it again. This works reasonably fast.
 #and clearconsole() now and then
-asserting() = true #making this a function results in code being invalidated and recompiled when this gets changed
+asserting() = false #making this a function results in code being invalidated and recompiled when this gets changed
 const all_parameters = 12
 
 macro mayassert(test)
@@ -17,14 +17,14 @@ mutable struct ParametersPack{T}
     #better to collect several possible strings
     #into the unique symbol
     chosen_modes::Dict{Symbol, Bool}
-    params_num::UInt16
+    params_num::Int16
     #Separately from the numerical values
-    control_b::UInt16
+    control_b::Int16
     dir_paths::Vector{String}
 end
 
-ParametersPack{Float64}() where {T}= ParametersPack(Dict{String, Float64}(),  Dict{Symbol, Bool}(), 0, 0, Vector{String}())
-ParametersPack{T}(iparams_num, icontrol_b, idir_paths) = ParametersPack(Dict{String, T}(),  Dict{Symbol, Bool}(), iparams_num, icontrol_b, idir_paths)
+ParametersPack{T}() where {T}= ParametersPack(Dict{String, T}(),  Dict{Symbol, Bool}(), convert(Int16, 0), convert(Int16, 0), Vector{String}())
+ParametersPack{T}(iparams_num, icontrol_b, idir_paths) where {T} = ParametersPack(Dict{String, T}(),  Dict{Symbol, Bool}(), iparams_num, icontrol_b, idir_paths)
 #ParametersPack(N, iparams_num, icontrol_b, idir_paths) = ParametersPack(Array{Float64,1}(undef, N),  Dict{Symbol, Bool}(), iparams_num, icontrol_b, idir_paths)
 
 function variables_from_txt(txt_file::AbstractString, prpk::ParametersPack{Float64}, type_of_txt = "")
@@ -34,61 +34,82 @@ function variables_from_txt(txt_file::AbstractString, prpk::ParametersPack{Float
     #Needed for choosing variable file from multiple
     nfilevars = 1
     each_varn = Dict{String, Vector{Float64}}()
+    println("type_of_txt: $type_of_txt")
     #From this thing depends number of ParametersPack
     if txt_p== "B" || txt_p== "MODE" || txt_p== "BMODE"
-        for name, value in readdlm(txt_p, '=')[:,1], readdlm(txt_p, '=')[:,2]
+        for (name, value) in zip(readdlm(txt_file, '=')[:, 1],  readdlm(txt_file, '=')[:, 2])
             name_ = lowercase(strip(name))
-            get!(prpk.chosen_modes, name_, value)
-            return prpk
-    end
+            println("$name_ .. $value")
+            get!(prpk.chosen_modes, Symbol(name_), value)
+        end
+        return prpk
     #multiple_parameters define which externally file I'm using, so
     #if there already several a, m, etc. then it is already defined
     elseif txt_p== "VAR" || txt_p== "VARIABLE"
         num_of_args = Vector{Int8}()
         num_of_variable_args = Vector{Int8}() #for example m, a, α
         #num_of_args = zeros(Int8, all_parameters)
-        for (n, v) in (readdlm(txt_p, '=')[1,:], readdlm(txt_p, '=')[2,:])
+        for (n, v) in zip(readdlm(txt_file, '=')[:, 1],  readdlm(txt_file, '=')[:, 2])
             if v isa Number
                 append!(num_of_args, 1)
             else
-                ns, vs = size(split(n, ","))[1], size(split(v, ","))[1]
+                ns, vs = size(split(n, ",") )[1], size(split(v, ",") )[1]
                 println("nvars $n with(=) $ns, nvalues $v with(=) $vs")
                 @mayassert ns == vs
-                append!(num_of_args, ns)
+                append!(num_of_args, ns) # parse(Int64, ns)
             end
         end
         max_param_num, ind = findmax(num_of_args)
         #Two distinct cases: values by pair and separate modes
-        max_param_num = max(readdlm(txt_p, '=')[:,1]
-        for name, value in readdlm(txt_p, '=')[:,1], readdlm(txt_p, '=')[:,2]
-            if size(split(name, ","))[1] > 1 #[1] because size returns tuple
-                println("Multiple parameters")
-                for nn, vv in split(name, ","), split(value, ",")
+        #max_param_num = max(readdlm(txt_file, '=')[:,2])
+        for (name, value) in zip(readdlm(txt_file, '=')[:, 1],  readdlm(txt_file, '=')[:, 2])
+            #Division by name
+            if (size(split(name, ","))[1] == 1) && (value isa Number)
+                name_ = lowercase(strip(name))
+                println("Single parameter: $value, $(typeof(value))")
+                get!(prpk.initial_model_values, name_, value)
+            #Division by value
+            elseif size(split(name, ","))[1] == 1 && size(split(value, ","))[1] > 1
+                name_ = lowercase(strip(name))
+                value_tmp = split(value, ",")
+                #i need to parse each element in value vec
+                value = parse.(Float64, value_tmp)
+                print("Varying variable $name_ , $value: $(typeof(value))")
+                #Just for clarity which variables I'm varying
+
+                if name_ == "α" && (value isa Vector || value isa Tuple)
+                    println("Varying α has $value ")
+                    each_varn[name_] = collect(value)
+                elseif name_ =="m" && (value isa Vector || value isa Tuple)
+                    println("Varying m has $value ")
+                    each_varn[name_] = collect(value)
+                elseif name_ =="a" && (value isa Vector || value isa Tuple)
+                    println("Varying a has $value ")
+                    each_varn[name_] = collect(value)
+                else #Multiple vars goes to the end
+                    get!(prpk.initial_model_values, name_, value)
+                    println(prpk)
+                end
+            elseif size(split(name, ","))[1] > 1 #[1] because size returns tuple
+                namesm = split(name, ",")
+                valuesm = split(value, ",")
+                println("Multiple parameters: $namesm, $valuesm")
+                for (nn, vv) in zip( namesm , valuesm )
+                    vv = parse(Float64, vv)
+                    #println(nn, "  -  ", vv," Expected by multiple use: ", typeof(nn), "  ", typeof(vv) )
                     get!(prpk.initial_model_values, nn, vv)
-                    #Just for clarity which variables I'm varying
-                    if name_ =="α" && (value isa Vector || value isa Tuple)
-                        println("Varying α has $value ")
-                        each_varn[name_] = value
-                    elseif name_ =="m" && (value isa Vector || value isa Tuple)
-                        println("Varying m has $value ")
-                        each_varn[name_] = value
-                    elseif name_ =="a" && (value isa Vector || value isa Tuple)
-                        println("Varying a has $value ")
-                        each_varn[name_] = value
-                    end
                 end
                    #prpk.initial_model_values[name_]
-            elseif size(split(name, ","))[1] = 1
-                println("Single parameter")
-                get!(prpk.initial_model_values, name, value)
             else
                 println("Parameters were mistakangly written, maybe there were zero of them")
             end
-        end
+        end#for
+        println("In this case, the return statement will contain a tuple")
         return (prpk, each_varn)
     elseif txt_p== "PATH" || txt_p== "PATHS"
-        for _, value in readdlm(txt_p, '=')[:,1], readdlm(txt_p, '=')[:,2]
-            prpk.dir_paths.push!(value)
+        for  (_, value) in zip(readdlm(txt_file, '=')[:, 1],  readdlm(txt_file, '=')[:, 2])
+            println(">>", value, typeof(value))
+            push!(prpk.dir_paths, value);
         end
         return prpk
     else
@@ -99,11 +120,11 @@ end
 #Support for inplace copying.
 import Base.copy!
 function copy!(dst::ParametersPack, src::ParametersPack)
-    dst.initial_model_values .= src.initial_model_values
+    dst.initial_model_values = src.initial_model_values
     dst.chosen_modes = src.chosen_modes
 end
 
-function copy!(dst::ParametersPack, src::Dict{String, Bool})
+function init_from_files()
     #Default values
     result_dirsave = "C:/Users/2020/Desktop/CurrentReading/AsideMy/RCJsPyJulia_projects/ConcreteFluidSystem/ParabolicEquation"
     fig_dirsave = "C:\\Users\\2020\\Desktop\\CurrentReading\\AsideMy\\Coursework\\FlatNonNewtonFlowProblem\\Images\\IterationShapes"
@@ -112,34 +133,38 @@ function copy!(dst::ParametersPack, src::Dict{String, Bool})
     paths_ = Vector{String}
     modes_ = Vector{Bool}
     variables_ = Vector{Int64}
-    prpk = ParametersPack(N, iparams_num, icontrol_b, idir_paths)
+    prpk = ParametersPack{Float64}()
     #Finally I am creating coies of my ParametersPack with
     #all found varying parameters
     #for (i, (name, value)) in enumerate(each_varn)
     #    all_prpk[i] =
     for i in read_parameters()
-       println("$i")
+       println("txt in outside loop: $i")
        if endswith(i, "pathmode.txt")
-           paths_ = variables_from_txt(i, prpk, type_of_txt = "PATH")
+           println(endswith(i, "pathmode.txt"), "  first")
+           paths_ = variables_from_txt(i, prpk, "PATH")
+       elseif endswith(i, "variablesmode.txt") && prpk.chosen_modes[:multiple_parameters]
+           println(endswith(i, "variablemode.txt"), "  second.m")
+           variables_, each_varn = variables_from_txt(i, prpk, "VARIABLE")
+           println("$variables_ ...\n $each_varn")
        elseif endswith(i, "variablemode.txt")
-           variables_, each_varn = variables_from_txt(i, prpk, type_of_txt = "VARIABLE")
-           println("$variables_ ... $each_varn")
+           variables_, each_varn = variables_from_txt(i, prpk, "VARIABLE")
+           println("$variables_ ...\n $each_varn")
        elseif endswith(i, "mode.txt")
-           modes_ = variables_from_txt(i, prpk, type_of_txt = "MODE")
+           println(endswith(i, "mode.txt"), "  third")
+           modes_ = variables_from_txt(i, prpk, "MODE")
        else
            print("Reading txt_files")
        end
    end
-    ml_prms,#multiple_parameters about parameters like α, m, a
-        deb_ts,#additional sleep time beetween function evaluations
-        deb_prout,#debug_output additional output
-        real,#type stable evaluation witout complex numbers
-        ml_trials,#define step modified repetition
-        save_hfig#(h- horizontal)the name speaks for itself
-        = @match read_parameters() begin
-
-    ParametersPack(N, iparams_num, icontrol_b, Vector[result_dirsave, fig_dirsave])
-    dst.chosen_modes
+   println("Chosen Modes will be: ", collect(values(prpk.chosen_modes)))
+   control_b, params_num = length(prpk.chosen_modes), length(prpk.initial_model_values)
+   pts = prpk.dir_paths
+   #I want to set number of parameters additionally
+   new_prpk = ParametersPack{Float64}()
+   copy!(new_prpk, prpk)#ParametersPack{Float64}(prpk.initial_model_values, params_num, control_b, pts)
+   print(new_prpk, "\n", prpk)
+    #dst.chosen_modes
 end
 
 
@@ -169,13 +194,13 @@ stdrdir(dir::AbstractString, pat::AbstractString) = stdrdir(dir, Glob.FilenameMa
 function read_parameters(dir::AbstractString  = pwd(), pat::AbstractString = raw"*mode.txt", read_std = true)
     all_files = Vector{String}
     if read_std
-    print("Standart parameters reading")
+    println("Standart parameters reading")
         return @match strip(pat) begin
             "" => stdrdir(dir) # only succeed when x > 5
              _ => stdrdir(dir, pat)
         end
     else
-        print("Simplified reading")
+        println("Simplified reading")
         return @match strip(pat) begin
             "" => @time rdir(dir) # only succeed when x > 5
              _ => @time rdir(dir, pat)
@@ -217,26 +242,7 @@ end
 #Generate necessary input parameters for the scheme
 
 
-used_methods::AbstractString = "fd"
-const boundary_h = (-5, 5) #lb::Integer= , rb::Integer=
-const boundary_v = (-5, 5)
-hgrid_steps::Vector{Int64} = []
-vgrid_steps::Vector{Int64} = []
-const Nh, Mv::Int64= 50, 100
-initial_shape = 3
-formula_init = false
-# 2D point's scope
-const LD, RD, LU, RU = Float64(boundary_h[1]), Float64(boundary_h[2]), Float64(boundary_v[1]), Float64(boundary_v[2])
-const hsize = RD - LD
-const vsize = RU - LU
-const initial_step_value::Int64 = 10
-const step_max::Int64 = 1000
-const expiremntal_increase = floor(Int64, step_max/5)
-#constant(linear proportionality) and the parameter
-#indicating the degree of the speed upon nonlinear dependence
-a, α = 3, 1.2
-#Convinience parameter and specifying porosity(constant (porosity))
-m = 1
+
 
 #using NativeFileDialog
 #path = raw"C:\Users\..."
