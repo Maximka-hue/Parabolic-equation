@@ -107,7 +107,7 @@ function variables_from_txt(txt_file::AbstractString, prpk::ParametersPack{Float
                 for (nn, vv) in zip( namesm , valuesm )
                     vv = parse(Float64, vv)
                     #println(nn, "  -  ", vv," Expected by multiple use: ", typeof(nn), "  ", typeof(vv) )
-                    get!(prpk.initial_model_values, nn, vv)
+                    get!(prpk.initial_model_values, strip(nn), vv)
                 end
                    #prpk.initial_model_values[name_]
             else
@@ -151,7 +151,7 @@ function init_from_files()
         end
     end
 
-    println("Need :multiple_parameters for chose of variables_file, $(prpk.chosen_modes[:multiple_parameters])")
+    println("Need :multiple_parameters for the chose of variables_file, $(prpk.chosen_modes[:multiple_parameters])")
     for i in read_parameters()
        println("txt in outside loop: $i")
        if endswith(i, "pathmode.txt")
@@ -247,12 +247,8 @@ function model_data_in_dir(primary_data, initial_dir)
     end
     return (rprimary_data, ndf)
 end
-#ParametersPack(mode::Dict{Symbol, Bool}) =
-
 
 #Generate necessary input parameters for the scheme
-
-
 
 
 #using NativeFileDialog
