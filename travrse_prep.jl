@@ -152,3 +152,233 @@ function choose_numgrid(hsize, vsize, initial_step_value, expiremntal_increase, 
     end
     return 1, Pdf, Pddf, hgrid, vgrid
 end
+
+
+#determine_initial_surface_shape(initial_shape, multiple_trials, NL_1, NH, MV, h, (LD, RD, LU, RU))
+function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials::Bool,
+    NL_1::Vector{Float64},  NH::Int64, MV::Int64, h::Float64,
+    LD, RD, LU, RU, hticks, vticks)
+    nd = ndigits(MV)
+    zeros_rep = repeat('0', nd - 1)
+    if !multiple_trials
+        hgrid = LD:h:RD # dr
+        vgrid = LU:τ:RU # dr
+        if initial_shape == 1
+            z::Float64 = 1.0
+            initial_const = z
+            @time for i in 1:NH
+            #print("I1: $i")
+                NL_1[i] = z
+            end
+            plot(hgrid, NL_1, c= :blue, label = "h(x) = $z at timestep = 1(from first up to $Mv)", xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5,
+            legend=:topleft)
+            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
+         elseif initial_shape == 2
+            Ru, Rd, Ld, Rd = RU^2, RD^2, LD^2, RD^2
+            R = max(Ru, Rd, Ld, Rd)
+            t = max(h, τ)
+            if !formula_init
+                 initial_const = 0.0
+                 center = if RD- LD >= 0
+                     (RD + LD)/2 # RD + LD
+                 else
+                     (RD - LD)/2
+                 end
+            NL_1[1] = initial_const
+            if isinteger(NH/2)
+                up_step = Int(NH/2)
+                NL_1[up_step] = R
+                mid_next = up_step + 1
+            else
+                up_step = floor(Int, NH/2)
+                NL_1[up_step+1] = R
+                mid_next = up_step + 1
+            end
+            @time for i in 2:(up_step)
+                print("I1: $i")
+                new_value = R - ((up_step - i) * t)^2
+                print("Step: $i, value: $new_value")
+                #new_value = sqrt(max(0, R^2 - i * h^2))
+                if new_value>=0
+                    NL_1[i] = sqrt(new_value)
+                else
+                    NL_1[i] = 0#sqrt(-new_value)
+                end
+            end
+            @time for j in mid_next:NH
+                #print("I1: $i")
+                new_value = R - ((j - up_step) * t)^2
+                if new_value>=0
+                    NL_1[j] = sqrt(new_value)
+                else
+                    NL_1[j] = 0#sqrt(-new_value)
+                end
+            end
+            NL_1[NH] = initial_const
+            plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",  xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
+            legend=:topleft)
+            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
+        else
+            if isinteger(NH/2)
+               Len = Int(NH/2)
+               u1 = range(LD, stop=0, length=Len)
+               u2 = range(0, stop=RD, length=Len)
+           else
+               Len = floor(NH/2)
+               u1 = range(LD, stop=0, length=Len)
+               u2 = range(0, stop=RD, length=Len+1)
+           end
+            v = range(LU, stop=RU, length=MV)
+            uu1 = -(collect(u1)^2 .- R)
+            uu2 = -(collect(u2)^2 .- R)
+            print(u,"\n", uu)
+            pause(4)
+            NL_1 = reduce(append!, (uu1, uu2), init=Float[])
+            plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",  xlims= (LD, RD), xlabel="r",
+                ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
+                legend=:topleft)
+            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
+        end
+            #This defines only x axis and label refers to it's legend
+            #xticks=
+        elseif initial_shape == 3
+            normalDensity(z) = pdf(Normal(), z)
+            d0 = normalDensity.(hgrid)
+            d1 = derivative.(normalDensity, hgrid)
+            d2 = second_derivative.(normalDensity, hgrid)
+            NL_1 = d0
+            plot(hgrid, [d0 d1 d2], c=[:blue :red :green], label=[L"f(x)" L"f’(x)" L"f’’(x)"], xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
+            legend=:topleft)
+                #This defines only x axis and label refers to it's legend
+            NL_1 = d0
+            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
+        end
+    end
+    return NL_1
+end
+
+
+function wvec_layer(NL_2::Vector{Float64}, file_record_p::String,
+    timestep::Int64, delim = " & \n", last_time_step::Int64 = 10000, all_in_one_file = false)
+    euclid_norm::Float64 = 0.0
+    NS2::Int64 = 0
+    if timestep>1 && timestep < last_time_step
+        NS2 = size(NL_2)[1]
+        euclid_norm = euclidean(NL_2, zeros(NS2))
+        println("Norm of vector: $euclid_norm\t, the size of second layer: $NS2")
+    end
+    if isfile(file_record_p) && all_in_one_file
+        # Open file in append mode and then write to it
+        exampleFileIOStream =  open(file_record_p, "a")
+        Base.close(exampleFileIOStream)
+        #write(exampleFileIOStream, [NL_2]);
+    else
+        print("Opening $file_record_p")
+        print(pwd())
+        open(file_record_p, "w") do io
+            writedlm(io, [NL_2], delim)
+            if timestep>1
+                writedlm(io, ["Norm of result vector: $euclid_norm",
+                    "Size of NL_2: $NS2"]," & ")
+            end
+        end
+    end
+end
+
+
+"""
+In one parameter set I need the following:
+- Two vectors for traversing the h, τ loops
+- one set each of primary_data and model_data
+- delimeter to write specifically results of traverses
+- file path for each horizontal traverse
+In multi-step configuration I would need the same, but
+- additionally instead of h, τ from model_data I will
+use their vector analogues
+If I want to use multi-parameter case(which may be with
+one-step or vector-step traverse) I will need to
+choose one that will be variable throughout the cycles.
+"""
+
+"Calculations within horizontal bypass approxiamation"
+function symmetric_layer_fill!(NL_2::Vector{Float64}, NL_1::Vector{Float64}, timestep::Int64)
+    Rel = τ/m
+    println("\n Variable steps: $τ ", " and $h"," τ/m=", "$Rel")
+    println("m: $m,\tProportionality constant a: $a,\tDegree of nonlinearity: $α")
+    deg_l, deg_c, deg_r = (1/α)-1, 1/α, 1+1/α
+    #Boundary conditions
+    #NL_2[1], maxelem_index = findmax(NL_1)
+    for j in 2:Nh
+         first_term = (NL_1[j+1]-NL_1[j])^deg_r/(a^deg_c* h^deg_r)
+         second_term = (NL_1[j]/(a^deg_c* h))*( (NL_1[j+1]-NL_1[j])/h )^deg_c
+         sech_derivative = (NL_1[j+1]-2*NL_1[j]+NL_1[j-1])/h^2
+         K = sech_derivative*NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l
+         (debug_output && println("Cautious at third term, : $K, others are: $second_term, $first_term"))
+         third_term =  K/(α* a^deg_c* h^deg_l) #sech_derivative* NL_1[j]* (NL_1[j+1]- NL_1[j])^deg_l/(α* a^deg_c* h^deg_l)
+         println("First_term: $first_term\tSecond_term: $second_term\tThird_term: $third_term\nWith second derivative = $sech_derivative")
+         (debug_time_sleep && sleep(2))
+         if initial_shape != 2
+              NL_2[j] = Rel* (first_term- second_term- third_term) + NL_1[j]
+              res_next_layer = round(NL_2[j], digits=4)
+              println("NL_2[$j]: \t$res_next_layer")
+         else
+             res = Rel * (first_term- second_term- third_term) + NL_1[j]
+             if  res < 100.0 && res > -100.0
+                  NL_2[j] = res
+             else
+                 NL_2[j] = NL_2[(NH - j)]
+            end
+        end
+     end
+     #Non-reflective conditions
+     NL_2[NH]= deepcopy(NL_2[Nh])
+     NL_2[1]= deepcopy(NL_2[2])
+     (debug_output && print("Second array after horizontal cross: $NL_2"))
+     println("The last element approximation get used to be: $(NL_2[NH]) and first boundary condition imply at previous layer step NL_2[1] = $(NL_2[1])")
+     shape_file_record = joinpath("Results", "Layerh_$(timestep).txt")
+     #shape_file_record = "Results/Layerh_$(timestep).txt"
+     wvec_layer(NL_2, shape_file_record, timestep)
+     #norm(NL_2) norm.(eachcol(NL_2))  f1(A,d=1) = sqrt.(sum(abs2,A,d))  f1(NL_2)
+     (debug_time_sleep && sleep(1))
+     (debug_output && print("Last step before return: $NL_2"))
+     return NL_2
+end
+
+
+#Let's start from the first one
+function axisymmetric_parabolic_scheme(u::Array{Float64, 2}, #timesteps::Integer,
+    Pdf::DataFrame, Pddf::DataFrame, uprev::Vector{Float64}, unew::Vector{Float64},
+    initial_shape::Int64)
+    simple_one_prmset = !multiple_trials && !multiple_parameter
+    println("Pdf:   ", eltype.(eachcol(Pdf)))
+    println("Pddf:   ", eltype.(eachcol(Pddf)))
+
+    # 2D point's scope
+    LD, RD, LU, RU = Float64(boundary_h[1]), Float64(boundary_h[2]), Float64(boundary_v[1]), Float64(boundary_v[2])
+    #This case determine the one-parameter set with 4-point stencil
+    if simple_one_prmset
+        Nh::Int64, Mv::Int64 = Pdf[3, 2]
+        println("Grid size: $Nh * $Mv")
+        τ, h, m, a, α = Pddf[1:5, 2]#parse(Vector{Float64}
+        hgrid = LD:h:RD # dr
+        vgrid = LU:τ:RU # dr
+        @time for i in 2:Mv
+            (debug_output && print("Layer $i\t"))
+            println("Before passing over to horizontal tour: layer NL_1 = ", uprev,"\nlayer NL_2 = ", unew)
+            unew = symmetric_layer_fill!(unew, uprev, i)
+            u[i, :] = deepcopy(unew)
+            #w[i] = NL_2
+            uprev = deepcopy(unew)
+            unew[:] .= 0.0
+            #print(hticks, vticks)
+            #sleep(2)
+            #, xticks= hticks, yticks = vticks, marker=:xcross, xlims= (LD, RD),ylims= (-LU, RU)
+            plot(hgrid, u[i, :], c = :blue, label = "h(x) = z at timestep $i")
+            plot!(hgrid, unew, label = "NL_2 at timestep $i");
+                nd = ndigits(MV)
+                ni = ndigits(i)
+                zeros_rep = repeat('0', nd - ni)
+            spfig(initial_shape, fig_dir, zeros_rep, i ,debug_output, save_hfig)
+        end
+    end
+end
