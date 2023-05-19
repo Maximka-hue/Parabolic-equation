@@ -1,4 +1,4 @@
-using Parameters, Glob, LinearAlgebra, ModelingToolkit#Symbols in dict use @variables
+using Parameters, Glob, LinearAlgebra, ModelingToolkit, MLStyle#Symbols in dict use @variables
 #Don't forget: clear the Workspace from the Console by pressing Ctrl+D to end Julia and Enter to start it again. This works reasonably fast.
 #and clearconsole() now and then
 asserting() = false #making this a function results in code being invalidated and recompiled when this gets changed
@@ -33,8 +33,10 @@ function copy!(dst::ParametersPack, src::ParametersPack)
     dst.dir_paths = src.dir_paths
 end
 
-ParametersPack{T}() where {T}= ParametersPack(Dict{String, T}(),  Dict{Symbol, Bool}(), convert(Int16, 0), convert(Int16, 0), Vector{String}())
-ParametersPack{T}(iparams_num, icontrol_b, idir_paths) where {T} = ParametersPack(Dict{String, T}(),  Dict{Symbol, Bool}(), iparams_num, icontrol_b, idir_paths)
+ParametersPack{T}() where {T}= ParametersPack(Dict{String, T}(),  Dict{Symbol, Bool}(),
+    convert(Int16, 0), convert(Int16, 0), Vector{String}())
+ParametersPack{T}(iparams_num, icontrol_b, idir_paths) where {T} = ParametersPack(Dict{String, T}(),  Dict{Symbol, Bool}(),
+    iparams_num, icontrol_b, idir_paths)
 #ParametersPack(N, iparams_num, icontrol_b, idir_paths) = ParametersPack(Array{Float64,1}(undef, N),  Dict{Symbol, Bool}(), iparams_num, icontrol_b, idir_paths)
 
 function variables_from_txt(txt_file::AbstractString, prpk::ParametersPack{Float64}, type_of_txt = "")
@@ -234,6 +236,7 @@ function model_data_in_dir(primary_data, initial_dir)
         fn = all_data_files[1]
         println("File found in the current directory: $fn")
         open(fn, "r") do f
+            #myarray=int(open(readdlm,"mynums.txt"))
             global rprimary_data
             dicttxt = readall(all_data_files)  # file information to string
             rprimary_data= JSON.parse(dicttxt)  # parse and transform data
@@ -249,7 +252,33 @@ function model_data_in_dir(primary_data, initial_dir)
 end
 
 #Generate necessary input parameters for the scheme
-
+function write_dirs_according_to_varying_parameters(a, α, m;same_then_reduce = true,  multiple_trials=false)
+        init_shape = "\\"
+        println(mkpath(anim_dir*"$(init_shape)_ijk\\"), ".... $anim_dir ... $(init_shape)_ijk ... ")
+        for i in size(a)[1], j = size(α)[1], k = size(m)[1]
+            println("Directory num: ", i, j, k)
+            init_shape = @match initial_shape begin
+                 1 => "Plane"
+                 2 => "Sphere"
+                 3 => "NormalDistribution"
+                _ => "smth_sh"
+            end
+            if same_then_reduce && size(a)[1] == size(α)[1] == size(m)[1] && i ==j ==k
+                to_create = joinpath(data_dir, "$(init_shape)_ijk")
+                mkdir(to_create)
+            else
+                #For each a, m, α separetely
+                #anim_dirn = mkpath(anim_dir*"$(init_shape)_ijk\\")
+                #data_dirn = mkpath(data_dir*"$(init_shape)_ijk\\")
+                to_create_anim = joinpath(anim_dir, "$(init_shape)_ijk\\")
+                to_create_data = joinpath(data_dir, "$(init_shape)_ijk\\")
+                (debug_output && println("Directory $to_create_anim or $to_create_data exists?"))
+                println(isdir(anim_dirn) , isdir(data_dir))
+                mkdir(anim_dirn)
+                mkdir(data_dirn)
+            end
+        end
+    end
 
 #using NativeFileDialog
 #path = raw"C:\Users\..."
