@@ -1,3 +1,6 @@
+include("default_variables.jl")
+using ToggleableAsserts, LaTeXStrings
+
 function arithmetic_prolong(initial_step_value = 1, expiremntal_increase  = 0, step_max  = 1; av = 0, alphav = 0, num_multiparams = 1, step = true)
     if step
         rand_steps = [i for i in collect(initial_step_value:expiremntal_increase:step_max)]
@@ -9,6 +12,72 @@ function arithmetic_prolong(initial_step_value = 1, expiremntal_increase  = 0, s
     return am, alpham
     end
 end
+
+#Compute approximate errors at tend with analytical solution
+#=
+function mesh_norm(u, mesh::Uniform1DFVMesh, p)
+    mesh_norm(u, mesh.Δx, p)
+end
+function mesh_norm(u, dx::Real, p)
+    @assert p > 0.0 "p must be a positive number"
+    if p == Inf
+        maximum(abs.(u))
+    else
+        (sum(abs,(u).^p)*dx)^(1/p)
+    end
+end
+=#
+#Intermittent functions
+@inline function all_elements_the_same(x, check_this_size = false)
+    length(x) < 2 && return true
+    e1 = x[1]
+    i = 2
+    (check_this_size && @mayassert e1 > 1)
+    @inbounds for i=2:length(x)
+        x[i] == e1 || return false
+    end
+    return true, e1
+end
+
+function findlongest(A)
+    idx = 0
+    len = 0
+    @inbounds for i in 1:length(A)
+        l = length(A[i])
+        l > len && (idx = i; len=l)
+    end
+    return A[idx]
+end
+
+function vecvec_to_array(vecvec)
+    dim1 = length(vecvec)
+    dim2 = length(vecvec[1])
+    my_array = zeros(Int64, dim1, dim2)
+    for i in 1:dim1
+        for j in 1:dim2
+            my_array[i,j] = vecvec[i][j]
+        end
+    end
+    return my_array
+end
+
+const NArray{N} = Array{T,N} where T
+
+function (NArray{N})(vector_of_arrays::Vector{Array{T,M}}; dims = 1) where {T, N,M}
+    M <= N || throw(MethodError(NArray{N}, (vector_of_arrays,)))
+    A = cat(vector_of_arrays...; dims)
+    reshape(A, ntuple(i->i <= ndims(A) ? size(A,i) : 1,N))
+end
+
+"Push the derivative forward by argument h with approximation to O(h^2)"
+diff_forward(f, x; l=sqrt(eps(Float64))) = (f(x+h) - f(x))/l
+const DFh = diff_forward
+"Advance the derivative in both directions by argument h with approximation up to O(h^3)"
+diff_central(f, x; l=cbrt(eps(Float64))) = (f(x+h/2) - f(x-h/2))/l
+const DCh = diff_forward
+"Push the derivative backward by argument h with approximation to O(h^2)"
+diff_backward(f, x; l=sqrt(eps(Float64))) = (f(x) - f(x-h))/l
+const DBh = diff_forward
 
 function spfig(initial_shape::Int64, fig_dir::String, zeros_rep::String, i::Int64, debug_output::Bool = true, save_hfig::Bool = true)
     if initial_shape in 1:3 && save_hfig
@@ -27,63 +96,51 @@ function spfig(initial_shape::Int64, fig_dir::String, zeros_rep::String, i::Int6
     end
 end
 
-"Push the derivative forward by argument h with approximation to O(h^2)"
-diff_forward(f, x; l=sqrt(eps(Float64))) = (f(x+h) - f(x))/l
-const DFh = diff_forward
-"Advance the derivative in both directions by argument h with approximation up to O(h^3)"
-diff_central(f, x; l=cbrt(eps(Float64))) = (f(x+h/2) - f(x-h/2))/l
-const DCh = diff_forward
-"Push the derivative backward by argument h with approximation to O(h^2)"
-diff_backward(f, x; l=sqrt(eps(Float64))) = (f(x) - f(x-h))/l
-const DBh = diff_forward
 
-
-function choose_numgrid(hsize, vsize, initial_step_value, expiremntal_increase, step_max, Nh, Mv, multiple_trials = false, multiple_parameter = false)
+function choose_numgrid(hsize, vsize, initial_step_value, expiremntal_increase, step_max, Nh, Mv, A= 1, multiple_trials = false, multiple_parameter = false)
+#Convert to positive grid steps
+    hsize, vsize = abs(hsize, vsize)
+    quot_stab = 2 * a[argmax(a)]
+    isvy, eiy, smy = (initial_step_value^2)/quot_stab, (expiremntal_increase^2)/quot_stab, (step_max^2)/quot_stab
+    rand_steps = arithmetic_prolong(initial_step_value, expiremntal_increase, step_max)
+    rsy = arithmetic_prolong(isvy, eiy, smy)
     rstep_size::Int64 = 0
     if multiple_trials #Doesn't introduce new scope
         hgrid_steps::Vector{Int64} = []
         vgrid_steps::Vector{Int64} = []
     end
     if multiple_trials
-        if hsize >=1 && vsize >=1
-            rand_steps = arithmetic_prolong(initial_step_value, expiremntal_increase, step_max)
-            hgrid_steps = hsize* rand_steps
-            vgrid_steps = vsize* rand_steps
+         #For explicitness I check all the cases independently
+        if (hsize >=1 && vsize >=1) || (hsize <= -1 && vsize  <= -1)
+            hgrid_steps =  rand_steps
+            vgrid_steps =  rsy
             #m- stands for multiple
             mh = hsize / hgrid_steps
             mv = vsize / vgrid_steps
         elseif hsize <= 1 && vsize <= 1 && hsize>=0 && vsize>=0
-            step_max_red = convert(Int64, hsize* step_max)
-            expiremntal_increase = step_max_red
-            rand_steps = arithmetic_prolong(initial_step_value, expiremntal_increase, step_max,av = 0, alphav = 0, num_multiparams = 1; step = true)
-            rand_steps = arithmetic_prolong(initial_step_value, expiremntal_increase, step_max)
+            step_max_red = convert(Int64, hsize * step_max)
+            expiremntal_increase = convert(Int64, hsize * expiremntal_increase)
+            rand_steps = arithmetic_prolong(initial_step_value, expiremntal_increase, step_max_red, av = 0, alphav = 0, num_multiparams = 1; step = true)
+            rsy = arithmetic_prolong(isvy, expiremntal_increase^2/quot_stab, step_max_red^2/quot_stab)
             hgrid_steps = rand_steps
-            vgrid_steps = rand_step
+            vgrid_steps = rsy
             mh = hsize / hgrid_steps
             mv = vsize / vgrid_steps
-        elseif hsize <= -1 && vsize  <= -1
-            #Convert to positive grid steps
-            hsize = min(0,- hsize)
-            vsize = min(0,- vsize)
-            rand_steps = arithmetic_prolong(initial_step_value, expiremntal_increase, step_max)
+        elseif hsize >= -1 && vsize >= -1 && hsize<=0 && vsize<=0
+            step_max_red = convert(Int64, hsize * step_max)
+            expiremntal_increase = convert(Int64, hsize * expiremntal_increase)
+            rand_steps = arithmetic_prolong(initial_step_value, expiremntal_increase, step_max_red, av = 0, alphav = 0, num_multiparams = 1; step = true)
+            rsy = arithmetic_prolong(isvy, expiremntal_increase^2/quot_stab, step_max_red^2/quot_stab)
             hgrid_steps = hsize* rand_steps
-            vgrid_steps = vsize* rand_steps
-            mh = hsize / hgrid_steps
-            mv = vsize / vgrid_steps
-        elseif hsize >= -1 && vsize >= -1 && hsize<=0 && vsize<=0 #For explicitness
-            hsize = min(0,- hsize)
-            vsize = min(0,- vsize)
-            step_max_red = hsize* step_max
-            expiremntal_increase = step_max_red
-            rand_steps = arithmetic_prolong(initial_step_value, expiremntal_increase, step_max)
-            hgrid_steps = rand_steps
-            vgrid_steps = rand_step
-            mh = hsize / hgrid_steps #m- stands for multiple
+            vgrid_steps = vsize* rsy #Maybe twice, just check it
+            mh = hsize / hgrid_steps #letter m- stands for multiple
             mv = vsize / vgrid_steps
             rstep_size = size(rand_steps)[1]
             mhs, mvs = size(mh)[1], size(mv)[1]
             @toggled_assert (length(mhs) == length(mvs) == length(rstep_size))
-            end
+        else
+            print("Impossible to reach out this case")
+        end
         #Here data is structured into the grid parameters and specifically model ones
         Pdf = DataFrame(Names_of_parameters = ["Used Methods",
             "Boundary conditions(Cartesian)", "Number of cells along axis(By default 100*100)"],
@@ -104,31 +161,15 @@ function choose_numgrid(hsize, vsize, initial_step_value, expiremntal_increase, 
         end
         mhgrid = [LD:hh:RD for hh in mh]
         mvgrid = [LU:vv:RU for vv in mv]
+        (hticks, vticks) = choose_approp_ticks(mhgrid, mvgrid, mh, mv, LU, LD, RU, RD)
         (debug_output && println("\n$mhgrid and $mvgrid"))
         return rstep_size, Pdf, Pddf, mhgrid, mvgrid
     else
-        if hsize>=0 && vsize>=0
-            h = (hsize/Nh)
-            τ = (vsize/Mv)
-        else
-            h = -(hsize/Nh)
-            τ = -(vsize/Mv)
-        end
+        #All numbers of steps along also on the off-chance I am converting to abs
+        h, τ = abs(hsize/(Nh+1)), abs(vsize/(Mv+1))#--------including right additional node
         hgrid = LD:h:RD # dr
         vgrid = LU:τ:RU # dr
-        if Nh<=30 && Mv <= 30
-            hticks = hgrid
-            vticks = LU:2*τ:RU
-        elseif Nh<= 150 && Mv <= 100
-            hticks = LD:5*h:RD
-            vticks = LU:10*τ:RU
-        elseif Nh<= 500  && Mv <= 500
-            hticks = LD:30*h:RD
-            vticks = LU:50*τ:RU
-        else
-            hticks = LD:40*h:RD
-            vticks = LU:60*τ:RU
-        end
+        (hticks, vticks) = choose_approp_ticks(hgrid, vgrid, h, τ, LU, LD, RU, RD)
         (debug_output && println("\n$hgrid and $vgrid"))
         #The simplest one-set default parameters and multiprams
         Pdf = DataFrame(Names_of_parameters = ["Used Methods",
@@ -141,7 +182,7 @@ function choose_numgrid(hsize, vsize, initial_step_value, expiremntal_increase, 
             @toggled_assert (length(a) == length(α) == length(rstep_size))
             Pddf = DataFrame(Names_of_derived_parameters =[
                 "Time step τ", "Space step h", "Porosity m",
-                "Proportionality constant a","Degree dependence α"], quantities = [τ, h, m, am, αm])
+                "Proportionality constant a","Degree dependence α", "hticks", "vticks"], quantities = [τ, h, m, am, αm, hticks, vticks])
         #The only set of parameters and grid configuration
         else
             Pddf = DataFrame(Names_of_derived_parameters =[
@@ -153,48 +194,88 @@ function choose_numgrid(hsize, vsize, initial_step_value, expiremntal_increase, 
     return 1, Pdf, Pddf, hgrid, vgrid
 end
 
+function choose_approp_ticks(hgrid::StepRange{Int64, Int64}, vgrid::StepRange{Int64, Int64},
+    h::Int64, τ::Int64, LU::Int64, LD::Int64, RU::Int64, RD::Int64)
+    if Nh<=30 && Mv <= 30
+        hticks = hgrid
+        vticks = LU:2*τ:RU
+    elseif Nh<= 150 && Mv <= 100
+        hticks = LD:5*h:RD
+        vticks = LU:10*τ:RU
+    elseif Nh<= 500  && Mv <= 500
+        hticks = LD:30*h:RD
+        vticks = LU:50*τ:RU
+    else
+        hticks = LD:40*h:RD
+        vticks = LU:60*τ:RU
+    end
+    return hticks, vticks
+end
 
-#determine_initial_surface_shape(initial_shape, multiple_trials, NL_1, NH, MV, h, (LD, RD, LU, RU))
-function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials::Bool,
-    NL_1::Vector{Float64},  NH::Int64, MV::Int64, h::Float64,
-    LD, RD, LU, RU, hticks, vticks)
+function choose_approp_ticks(hgrid::Vector{StepRange{Int64, Int64}}, vgrid::Vector{StepRange{Int64, Int64}},
+    h::Int64, τ::Int64, LU::Int64, LD::Int64, RU::Int64, RD::Int64)
+    hticks::Vector{StepRange{Int64, Int64}}
+    vticks::Vector{StepRange{Int64, Int64}}
+    for (i, hg, vg) in enumerate(hgrid, vgrid)
+        println("Checking out th $ith step!")
+        hticks[i], vticks[i] = choose_approp_ticks(hg, vg,
+                                                h, τ, LU, LD, RU, RD)
+    end
+    return hticks, vticks
+end
+
+#One-StepSet-One-ParametersSet
+function determine_initial_surface_shape!(initial_shape::Int64, NL_1::Vector{Float64},
+    NH::Int64, MV::Int64, h::Float64, τ::Float64, LD, RD, LU, RU,
+    hticks, vticks) #Will be the ... ˜ not same, but ...
+    #The number of digits to fill the name of the picture
     nd = ndigits(MV)
     zeros_rep = repeat('0', nd - 1)
-    if !multiple_trials
-        hgrid = LD:h:RD # dr
-        vgrid = LU:τ:RU # dr
-        if initial_shape == 1
-            z::Float64 = 1.0
-            initial_const = z
-            @time for i in 1:NH
-            #print("I1: $i")
-                NL_1[i] = z
-            end
-            plot(hgrid, NL_1, c= :blue, label = "h(x) = $z at timestep = 1(from first up to $Mv)", xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5,
-            legend=:topleft)
-            spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
-         elseif initial_shape == 2
-            Ru, Rd, Ld, Rd = RU^2, RD^2, LD^2, RD^2
-            R = max(Ru, Rd, Ld, Rd)
-            t = max(h, τ)
-            if !formula_init
-                 initial_const = 0.0
-                 center = if RD- LD >= 0
-                     (RD + LD)/2 # RD + LD
-                 else
-                     (RD - LD)/2
-                 end
-            NL_1[1] = initial_const
-            if isinteger(NH/2)
-                up_step = Int(NH/2)
-                NL_1[up_step] = R
-                mid_next = up_step + 1
+    hgrid = LD:h:RD # dr
+    vgrid = LU:τ:RU # dr
+    if initial_shape == 1
+        z::Float64 = 1.0
+        @time for i in 1:NH
+            NL_1[i] = z
+        end
+        plot(hgrid, NL_1, c= :blue, label = "h(x) = $z at timestep = 1(from first up to $Mv)", xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5,
+        legend=:topleft)
+        spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
+    elseif initial_shape == 2
+        formula_init = false#use usual loops instead broadcasting
+        Ru, Rd, Ld, Rd = RU^2, RD^2, LD^2, RD^2
+        R = max(Ru, Rd, Ld, Rd)
+        t = max(h, τ)
+        if !formula_init
+            initial_const = 0.0
+            center = if RD- LD >= 0
+                (RD + LD)/2 # RD + LD
             else
-                up_step = floor(Int, NH/2)
-                NL_1[up_step+1] = R
-                mid_next = up_step + 1
+                (RD - LD)/2
             end
-            @time for i in 2:(up_step)
+            NL_1[1] = initial_const
+            center_step = 0
+            is_center_even = false
+            try
+                center_step = Int(NH/2)
+                is_center_even = isinteger(center_step)
+            catch err
+                if isa(err, InexactError)
+                    println("Error with division occured")
+                 #is_center_even is false
+                end
+            end
+            if is_center_even
+                center_step = Int(NH/2)
+                NL_1[center_step] = R
+                mid_next = center_step + 1
+            else
+                #center_step = round(NH/2)#the less if *.5
+                center_step = floor(Int,NH/2)
+                NL_1[center_step + 1] = R
+                mid_next = center_step + 2
+            end
+            @time for i in 2:(center_step)
                 print("I1: $i")
                 new_value = R - ((up_step - i) * t)^2
                 print("Step: $i, value: $new_value")
@@ -214,12 +295,24 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
                     NL_1[j] = 0#sqrt(-new_value)
                 end
             end
-            NL_1[NH] = initial_const
-            plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",  xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
-            legend=:topleft)
+            NL_1[NH] = initial_const # Or NL_1[NH] = NL[NH-1]
+            plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",
+            xlims= (LD, RD), xlabel="r", ylims= (LU, RU), lw=0.5,
+            xticks= hticks, yticks = vticks, minorgridlinewidth = h,legend=:topleft)
             spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
         else
-            if isinteger(NH/2)
+            center_step = 0
+            is_center_even = false
+            try
+                center_step = Int(NH/2)
+                is_center_even = isinteger(center_step)
+            catch err
+                if isa(err, InexactError)
+                    println("Error with division occured")
+                 #is_center_even is false
+                end
+            end
+            if is_center_even
                Len = Int(NH/2)
                u1 = range(LD, stop=0, length=Len)
                u2 = range(0, stop=RD, length=Len)
@@ -232,7 +325,6 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
             uu1 = -(collect(u1)^2 .- R)
             uu2 = -(collect(u2)^2 .- R)
             print(u,"\n", uu)
-            pause(4)
             NL_1 = reduce(append!, (uu1, uu2), init=Float[])
             plot(hgrid, NL_1, c=:blue, label=L"h(x, 0)",  xlims= (LD, RD), xlabel="r",
                 ylims= (LU, RU), lw=0.5, xticks= hticks, yticks = vticks, minorgridlinewidth = h,
@@ -253,11 +345,26 @@ function determine_initial_surface_shape!(initial_shape::Int64, multiple_trials:
             NL_1 = d0
             spfig(initial_shape, fig_dir, zeros_rep, 1, debug_output, save_hfig)
         end
-    end
-    return NL_1
+        return NL_1
 end
 
+function write_dirs_according_to_varying_parameters(initial_shape::Int64, NL_1::Vector{Float64},
+    NH::Int64, MV::Int64, h::Float64, τ::Float64, LD, RD, LU, RU,
+    hticks, vticks, a, α, m; same_then_reduce=true)
+    print("")
 
+end
+
+function resilient_square_root(x::Number)
+        try
+            sqrt(x)
+        catch err
+            if isa(err, DomainError)
+                sqrt(complex(x))
+            end
+        end
+    end
+#=
 function wvec_layer(NL_2::Vector{Float64}, file_record_p::String,
     timestep::Int64, delim = " & \n", last_time_step::Int64 = 10000, all_in_one_file = false)
     euclid_norm::Float64 = 0.0
@@ -382,3 +489,4 @@ function axisymmetric_parabolic_scheme(u::Array{Float64, 2}, #timesteps::Integer
         end
     end
 end
+=#
